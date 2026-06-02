@@ -1,0 +1,410 @@
+package entities
+
+import (
+	"errors"
+	"time"
+)
+
+// VenueImage representa una imagen asociada a un venue con metadatos completos
+type VenueImage struct {
+	URL          string    `json:"url"`
+	IsPrimary    bool      `json:"is_primary"`
+	Type         string    `json:"type"`                    // "general", "floor_plan", "stage", "entrance", "backstage"
+	Caption      *string   `json:"caption,omitempty"`       // Título o descripción
+	SortOrder    int       `json:"sort_order"`              // Para ordenar manualmente
+	UploadedAt   time.Time `json:"uploaded_at"`             // Cuándo se subió
+	ThumbnailURL *string   `json:"thumbnail_url,omitempty"` // Para CDN
+	MediumURL    *string   `json:"medium_url,omitempty"`    // Para CDN
+}
+
+// Venue recinto para eventos
+// Mapea exactamente la tabla ticketing.venues
+type Venue struct {
+	ID       int64  `json:"id" db:"id"`
+	PublicID string `json:"public_id" db:"public_uuid"`
+
+	Name        string  `json:"name" db:"name"`
+	Slug        string  `json:"slug" db:"slug"`
+	Description *string `json:"description,omitempty" db:"description"`
+	VenueType   string  `json:"venue_type" db:"venue_type"` // indoor, outdoor, stadium, theater, etc.
+
+	AddressLine1 string  `json:"address_line1" db:"address_line1"`
+	AddressLine2 *string `json:"address_line2,omitempty" db:"address_line2"`
+	City         string  `json:"city" db:"city"`
+	State        *string `json:"state,omitempty" db:"state"`
+	PostalCode   *string `json:"postal_code,omitempty" db:"postal_code"`
+	Country      string  `json:"country" db:"country"`
+
+	Latitude  *float64 `json:"latitude,omitempty" db:"latitude"`
+	Longitude *float64 `json:"longitude,omitempty" db:"longitude"`
+
+	Capacity         *int `json:"capacity,omitempty" db:"capacity"`
+	SeatingCapacity  *int `json:"seating_capacity,omitempty" db:"seating_capacity"`
+	StandingCapacity *int `json:"standing_capacity,omitempty" db:"standing_capacity"`
+
+	Facilities            *[]string `json:"facilities,omitempty" db:"facilities,type:jsonb"`
+	AccessibilityFeatures *[]string `json:"accessibility_features,omitempty" db:"accessibility_features,type:jsonb"`
+
+	ContactEmail *string `json:"contact_email,omitempty" db:"contact_email"`
+	ContactPhone *string `json:"contact_phone,omitempty" db:"contact_phone"`
+
+	// Estructura completa para imágenes
+	Images *[]VenueImage `json:"images,omitempty" db:"images,type:jsonb"`
+
+	IsActive bool `json:"is_active" db:"is_active"`
+
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// Métodos de utilidad para Venue
+
+// HasFullAddress verifica si tiene dirección completa
+func (v *Venue) HasFullAddress() bool {
+	return v.AddressLine1 != "" &&
+		v.City != "" &&
+		v.Country != "" &&
+		v.PostalCode != nil && *v.PostalCode != ""
+}
+
+// GetFullAddress obtiene la dirección completa formateada
+func (v *Venue) GetFullAddress() string {
+	address := v.AddressLine1
+	if v.AddressLine2 != nil && *v.AddressLine2 != "" {
+		address += ", " + *v.AddressLine2
+	}
+	address += ", " + v.City
+	if v.State != nil && *v.State != "" {
+		address += ", " + *v.State
+	}
+	if v.PostalCode != nil && *v.PostalCode != "" {
+		address += " " + *v.PostalCode
+	}
+	address += ", " + v.Country
+	return address
+}
+
+// HasCoordinates verifica si tiene coordenadas
+func (v *Venue) HasCoordinates() bool {
+	return v.Latitude != nil && v.Longitude != nil
+}
+
+// GetCoordinates obtiene las coordenadas como un par (lat, lng)
+func (v *Venue) GetCoordinates() (float64, float64) {
+	if !v.HasCoordinates() {
+		return 0, 0
+	}
+	return *v.Latitude, *v.Longitude
+}
+
+// GetTotalCapacity obtiene la capacidad total
+func (v *Venue) GetTotalCapacity() int {
+	if v.Capacity != nil {
+		return *v.Capacity
+	}
+
+	total := 0
+	if v.SeatingCapacity != nil {
+		total += *v.SeatingCapacity
+	}
+	if v.StandingCapacity != nil {
+		total += *v.StandingCapacity
+	}
+	return total
+}
+
+// HasSeating verifica si tiene asientos
+func (v *Venue) HasSeating() bool {
+	return v.SeatingCapacity != nil && *v.SeatingCapacity > 0
+}
+
+// HasStanding verifica si tiene espacio de pie
+func (v *Venue) HasStanding() bool {
+	return v.StandingCapacity != nil && *v.StandingCapacity > 0
+}
+
+// AddFacility añade una instalación
+func (v *Venue) AddFacility(facility string) {
+	if v.Facilities == nil {
+		v.Facilities = &[]string{}
+	}
+
+	for _, f := range *v.Facilities {
+		if f == facility {
+			return
+		}
+	}
+
+	*v.Facilities = append(*v.Facilities, facility)
+	v.UpdatedAt = time.Now()
+}
+
+// RemoveFacility elimina una instalación
+func (v *Venue) RemoveFacility(facility string) {
+	if v.Facilities == nil {
+		return
+	}
+
+	newFacilities := []string{}
+	for _, f := range *v.Facilities {
+		if f != facility {
+			newFacilities = append(newFacilities, f)
+		}
+	}
+
+	if len(newFacilities) == 0 {
+		v.Facilities = nil
+	} else {
+		*v.Facilities = newFacilities
+	}
+	v.UpdatedAt = time.Now()
+}
+
+// HasFacility verifica si tiene una instalación específica
+func (v *Venue) HasFacility(facility string) bool {
+	if v.Facilities == nil {
+		return false
+	}
+
+	for _, f := range *v.Facilities {
+		if f == facility {
+			return true
+		}
+	}
+	return false
+}
+
+// AddAccessibilityFeature añade una característica de accesibilidad
+func (v *Venue) AddAccessibilityFeature(feature string) {
+	if v.AccessibilityFeatures == nil {
+		v.AccessibilityFeatures = &[]string{}
+	}
+
+	for _, f := range *v.AccessibilityFeatures {
+		if f == feature {
+			return
+		}
+	}
+
+	*v.AccessibilityFeatures = append(*v.AccessibilityFeatures, feature)
+	v.UpdatedAt = time.Now()
+}
+
+// RemoveAccessibilityFeature elimina una característica de accesibilidad
+func (v *Venue) RemoveAccessibilityFeature(feature string) {
+	if v.AccessibilityFeatures == nil {
+		return
+	}
+
+	newFeatures := []string{}
+	for _, f := range *v.AccessibilityFeatures {
+		if f != feature {
+			newFeatures = append(newFeatures, f)
+		}
+	}
+
+	if len(newFeatures) == 0 {
+		v.AccessibilityFeatures = nil
+	} else {
+		*v.AccessibilityFeatures = newFeatures
+	}
+	v.UpdatedAt = time.Now()
+}
+
+// HasAccessibilityFeature verifica si tiene una característica de accesibilidad
+func (v *Venue) HasAccessibilityFeature(feature string) bool {
+	if v.AccessibilityFeatures == nil {
+		return false
+	}
+
+	for _, f := range *v.AccessibilityFeatures {
+		if f == feature {
+			return true
+		}
+	}
+	return false
+}
+
+// AddImage añade una imagen con metadatos completos
+func (v *Venue) AddImage(image VenueImage) {
+	if v.Images == nil {
+		v.Images = &[]VenueImage{}
+	}
+
+	// Verificar si ya existe
+	for i, img := range *v.Images {
+		if img.URL == image.URL {
+			return
+		}
+		if image.IsPrimary {
+			(*v.Images)[i].IsPrimary = false
+		}
+	}
+
+	image.UploadedAt = time.Now()
+	*v.Images = append(*v.Images, image)
+	v.UpdatedAt = time.Now()
+}
+
+// RemoveImage elimina una imagen por URL
+func (v *Venue) RemoveImage(imageURL string) {
+	if v.Images == nil {
+		return
+	}
+
+	newImages := []VenueImage{}
+	for _, img := range *v.Images {
+		if img.URL != imageURL {
+			newImages = append(newImages, img)
+		}
+	}
+
+	if len(newImages) == 0 {
+		v.Images = nil
+	} else {
+		*v.Images = newImages
+		// Asegurar que haya una imagen principal
+		v.ensurePrimaryImage()
+	}
+	v.UpdatedAt = time.Now()
+}
+
+// SetPrimaryImage establece una imagen como principal
+func (v *Venue) SetPrimaryImage(imageURL string) error {
+	if v.Images == nil {
+		return errors.New("no images to set as primary")
+	}
+
+	found := false
+	for i, img := range *v.Images {
+		if img.URL == imageURL {
+			found = true
+			(*v.Images)[i].IsPrimary = true
+		} else {
+			(*v.Images)[i].IsPrimary = false
+		}
+	}
+
+	if !found {
+		return errors.New("image not found")
+	}
+
+	v.UpdatedAt = time.Now()
+	return nil
+}
+
+// GetPrimaryImage obtiene la imagen principal
+func (v *Venue) GetPrimaryImage() *VenueImage {
+	if v.Images == nil {
+		return nil
+	}
+
+	for _, img := range *v.Images {
+		if img.IsPrimary {
+			return &img
+		}
+	}
+
+	// Si no hay principal, devolver la primera
+	if len(*v.Images) > 0 {
+		return &(*v.Images)[0]
+	}
+	return nil
+}
+
+// GetImagesByType obtiene imágenes de un tipo específico
+func (v *Venue) GetImagesByType(imageType string) []VenueImage {
+	if v.Images == nil {
+		return []VenueImage{}
+	}
+
+	result := []VenueImage{}
+	for _, img := range *v.Images {
+		if img.Type == imageType {
+			result = append(result, img)
+		}
+	}
+	return result
+}
+
+// ensurePrimaryImage asegura que haya al menos una imagen principal
+func (v *Venue) ensurePrimaryImage() {
+	if v.Images == nil || len(*v.Images) == 0 {
+		return
+	}
+
+	hasPrimary := false
+	for _, img := range *v.Images {
+		if img.IsPrimary {
+			hasPrimary = true
+			break
+		}
+	}
+
+	if !hasPrimary && len(*v.Images) > 0 {
+		(*v.Images)[0].IsPrimary = true
+	}
+}
+
+// Validate verifica que el venue sea válido
+func (v *Venue) Validate() error {
+	if v.Name == "" {
+		return errors.New("name is required")
+	}
+	if v.Slug == "" {
+		return errors.New("slug is required")
+	}
+	if v.AddressLine1 == "" {
+		return errors.New("address_line1 is required")
+	}
+	if v.City == "" {
+		return errors.New("city is required")
+	}
+	if v.Country == "" {
+		return errors.New("country is required")
+	}
+	if v.VenueType == "" {
+		return errors.New("venue_type is required")
+	}
+
+	if v.Latitude != nil && (*v.Latitude < -90 || *v.Latitude > 90) {
+		return errors.New("latitude must be between -90 and 90")
+	}
+	if v.Longitude != nil && (*v.Longitude < -180 || *v.Longitude > 180) {
+		return errors.New("longitude must be between -180 and 180")
+	}
+
+	return nil
+}
+
+// IsIndoor verifica si es indoor
+func (v *Venue) IsIndoor() bool {
+	return v.VenueType == "indoor"
+}
+
+// IsOutdoor verifica si es outdoor
+func (v *Venue) IsOutdoor() bool {
+	return v.VenueType == "outdoor"
+}
+
+// IsStadium verifica si es un estadio
+func (v *Venue) IsStadium() bool {
+	return v.VenueType == "stadium"
+}
+
+// IsTheater verifica si es un teatro
+func (v *Venue) IsTheater() bool {
+	return v.VenueType == "theater"
+}
+
+// GetContactInfo obtiene información de contacto
+func (v *Venue) GetContactInfo() map[string]string {
+	info := make(map[string]string)
+	if v.ContactEmail != nil {
+		info["email"] = *v.ContactEmail
+	}
+	if v.ContactPhone != nil {
+		info["phone"] = *v.ContactPhone
+	}
+	return info
+}
