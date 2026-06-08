@@ -66,6 +66,10 @@ type Event struct {
 	PublishedAt *time.Time `json:"published_at,omitempty" db:"published_at"`
 	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
+
+	//coordenadas geográficas
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
 }
 
 // EventSettings representa la configuración JSONB del evento

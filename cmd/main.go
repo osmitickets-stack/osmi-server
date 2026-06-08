@@ -11,6 +11,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	pb "github.com/franciscozamorau/osmi-protobuf/gen/pb"
+	"github.com/franciscozamorau/osmi-server/internal/api/grpc/interceptors"
 	handlersgrpc "github.com/franciscozamorau/osmi-server/internal/application/handlers/grpc"
 	"github.com/franciscozamorau/osmi-server/internal/application/services"
 	"github.com/franciscozamorau/osmi-server/internal/config"
@@ -154,7 +155,9 @@ func main() {
 
 func startServer(handler *handlersgrpc.Handler, port string) {
 	address := ":" + port
-	server := grpc.NewServer()
+	server := grpc.NewServer(
+		grpc.UnaryInterceptor(interceptors.AuthUnaryInterceptor),
+	)
 
 	pb.RegisterOsmiServiceServer(server, handler)
 	reflection.Register(server)

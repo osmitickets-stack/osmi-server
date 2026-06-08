@@ -43,7 +43,6 @@ func NewUserService(
 	}
 }
 
-// Register registra un nuevo usuario
 func (s *UserService) Register(ctx context.Context, req *userdto.CreateUserRequest) (*entities.User, error) {
 	if err := s.validateCreateUserRequest(req); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
@@ -138,11 +137,13 @@ func (s *UserService) Register(ctx context.Context, req *userdto.CreateUserReque
 
 // AuthResponse es la estructura que devuelve autenticación
 type AuthResponse struct {
-	PublicID  string
-	Email     string
-	Username  *string
-	Role      string
-	CreatedAt time.Time
+	PublicID    string
+	Email       string
+	Username    *string
+	Role        string
+	IsStaff     bool
+	IsSuperuser bool
+	CreatedAt   time.Time
 }
 
 // Authenticate verifica credenciales y devuelve el usuario autenticado
@@ -189,15 +190,16 @@ func (s *UserService) Authenticate(ctx context.Context, email, password string) 
 	}
 
 	return &AuthResponse{
-		PublicID:  user.PublicID,
-		Email:     user.Email,
-		Username:  user.Username,
-		Role:      role,
-		CreatedAt: user.CreatedAt,
+		PublicID:    user.PublicID,
+		Email:       user.Email,
+		Username:    user.Username,
+		Role:        role,
+		IsStaff:     user.IsStaff,
+		IsSuperuser: user.IsSuperuser,
+		CreatedAt:   user.CreatedAt,
 	}, nil
 }
 
-// GetProfile obtiene el perfil de un usuario
 func (s *UserService) GetProfile(ctx context.Context, userID int64) (*entities.User, error) {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -209,7 +211,6 @@ func (s *UserService) GetProfile(ctx context.Context, userID int64) (*entities.U
 	return user, nil
 }
 
-// UpdateProfile actualiza el perfil de un usuario
 func (s *UserService) UpdateProfile(ctx context.Context, userID int64, req *userdto.UpdateUserRequest) (*entities.User, error) {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -260,7 +261,6 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, req *user
 	return user, nil
 }
 
-// ChangePassword cambia la contraseña de un usuario
 func (s *UserService) ChangePassword(ctx context.Context, userID int64, req *userdto.ChangePasswordRequest) error {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -289,7 +289,6 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, req *use
 	return nil
 }
 
-// Logout invalida un token (lo agrega a blacklist en Redis)
 func (s *UserService) Logout(ctx context.Context, token string) error {
 	if token == "" {
 		return errors.New("token is required")
@@ -314,7 +313,6 @@ func (s *UserService) Logout(ctx context.Context, token string) error {
 	return nil
 }
 
-// RefreshToken genera un nuevo token
 func (s *UserService) RefreshToken(ctx context.Context, oldToken string) (string, time.Time, error) {
 	claims, err := s.jwtService.ValidateToken(oldToken)
 	if err != nil {
@@ -330,7 +328,6 @@ func (s *UserService) RefreshToken(ctx context.Context, oldToken string) (string
 	return newToken, expiresAt, nil
 }
 
-// LogoutAll cierra todas las sesiones de un usuario
 func (s *UserService) LogoutAll(ctx context.Context, userID int64) error {
 	if err := s.sessionRepo.InvalidateAllForUser(ctx, userID); err != nil {
 		return fmt.Errorf("failed to logout all sessions: %w", err)
@@ -338,7 +335,6 @@ func (s *UserService) LogoutAll(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// DeleteAccount desactiva la cuenta de un usuario
 func (s *UserService) DeleteAccount(ctx context.Context, userID int64) error {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -359,7 +355,6 @@ func (s *UserService) DeleteAccount(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// validateCreateUserRequest valida los datos de registro
 func (s *UserService) validateCreateUserRequest(req *userdto.CreateUserRequest) error {
 	if req.Email == "" {
 		return errors.New("email is required")
@@ -379,7 +374,6 @@ func (s *UserService) validateCreateUserRequest(req *userdto.CreateUserRequest) 
 	return nil
 }
 
-// GetUserByPublicID obtiene un usuario por su PublicID (UUID)
 func (s *UserService) GetUserByPublicID(ctx context.Context, publicID string) (*entities.User, error) {
 	user, err := s.userRepo.GetByPublicID(ctx, publicID)
 	if err != nil {
@@ -391,7 +385,6 @@ func (s *UserService) GetUserByPublicID(ctx context.Context, publicID string) (*
 	return user, nil
 }
 
-// ListUsers lista todos los usuarios activos
 func (s *UserService) ListUsers(ctx context.Context, page, pageSize int) ([]*entities.User, int64, error) {
 	if page <= 0 {
 		page = 1
@@ -404,7 +397,6 @@ func (s *UserService) ListUsers(ctx context.Context, page, pageSize int) ([]*ent
 	return s.userRepo.List(ctx, pageSize, offset)
 }
 
-// UpdateUser actualiza un usuario existente
 func (s *UserService) UpdateUser(ctx context.Context, publicID string, req *userdto.UpdateUserRequest) (*entities.User, error) {
 	log.Printf("📝 UpdateUser service: publicID=%s", publicID)
 

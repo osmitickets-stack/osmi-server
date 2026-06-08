@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"strconv"
+	"time"
 
 	osmi "github.com/franciscozamorau/osmi-protobuf/gen/pb"
 	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
@@ -12,7 +13,9 @@ import (
 	"github.com/franciscozamorau/osmi-server/internal/api/helpers"
 	"github.com/franciscozamorau/osmi-server/internal/application/services"
 	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -202,7 +205,29 @@ func (h *TicketHandler) ListTickets(ctx context.Context, req *osmi.ListTicketsRe
 		DateTo:   req.DateTo,
 	}
 
-	// Si el request ya trae customer_id, usarlo directamente
+	// Extraer user_id del JWT desde la metadata gRPC
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		authHeaders := md.Get("authorization")
+		if len(authHeaders) > 0 {
+			tokenString := authHeaders[0]
+			if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+				tokenString = tokenString[7:]
+			}
+			// Decodificar JWT para obtener user_id
+			token, _, err := new(jwt.Parser).ParseUnverified(tokenString, jwt.MapClaims{})
+			if err == nil {
+				if claims, ok := token.Claims.(jwt.MapClaims); ok {
+					if userID, ok := claims["user_id"].(string); ok && userID != "" {
+						customerID, err := h.ticketService.GetCustomerIDByUserID(ctx, userID)
+						if err == nil && customerID > 0 {
+							filter.CustomerID = &customerID
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if req.CustomerId != "" {
 		customerID, err := strconv.ParseInt(req.CustomerId, 10, 64)
 		if err == nil {
@@ -307,15 +332,20 @@ func (h *TicketHandler) ticketToProto(ticket *entities.Ticket) *osmi.TicketRespo
 	}
 
 	return &osmi.TicketResponse{
-		TicketId:      ticket.PublicID,
-		Status:        ticket.Status,
-		Code:          ticket.Code,
-		QrCodeUrl:     helpers.SafeStringPtr(ticket.QRCodeData),
-		EventName:     ticket.EventName, // 🔥 NUEVO
-		EventDate:     "",
-		Location:      ticket.Location, // 🔥 NUEVO
+		TicketId:  ticket.PublicID,
+		Status:    ticket.Status,
+		Code:      ticket.Code,
+		QrCodeUrl: helpers.SafeStringPtr(ticket.QRCodeData),
+		EventName: ticket.EventName,
+		EventDate: func() string {
+			if ticket.SoldAt != nil {
+				return ticket.SoldAt.Format(time.RFC3339)
+			}
+			return ticket.CreatedAt.Format(time.RFC3339)
+		}(),
+		Location:      ticket.Location,
 		Price:         ticket.FinalPrice,
-		CategoryName:  ticket.CategoryName, // 🔥 NUEVO
+		CategoryName:  ticket.CategoryName,
 		SeatNumber:    "",
 		CustomerName:  "",
 		CustomerEmail: "",

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
@@ -635,4 +636,23 @@ func (s *TicketService) ReleaseExpiredReservations(ctx context.Context) (int64, 
 
 	log.Printf("✅ Liberadas %d reservas expiradas", count)
 	return count, nil
+}
+
+func (s *TicketService) GetCustomerIDByUserID(ctx context.Context, userID string) (int64, error) {
+	customers, _, err := s.customerRepo.Find(ctx, &repository.CustomerFilter{
+		UserID: stringToInt64Ptr(userID),
+		Limit:  1,
+	})
+	if err != nil || len(customers) == 0 {
+		return 0, fmt.Errorf("customer not found for user %s", userID)
+	}
+	return customers[0].ID, nil
+}
+
+func stringToInt64Ptr(s string) *int64 {
+	id, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return nil
+	}
+	return &id
 }

@@ -34,23 +34,21 @@ func (r *EventRepository) handleError(err error, context string) error {
 		return nil
 	}
 
-	// Para pgx, los errores son diferentes
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("event not found")
 	}
 
-	// Verificar si es un error de PostgreSQL con código
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
-		case "23505": // Unique violation
+		case "23505":
 			if strings.Contains(pgErr.ConstraintName, "events_slug_key") {
 				return fmt.Errorf("event slug already exists")
 			}
 			if strings.Contains(pgErr.ConstraintName, "events_public_uuid_key") {
 				return fmt.Errorf("event public_uuid already exists")
 			}
-		case "23503": // Foreign key violation
+		case "23503":
 			return fmt.Errorf("referenced record not found: %w", err)
 		}
 	}
@@ -58,9 +56,8 @@ func (r *EventRepository) handleError(err error, context string) error {
 	return fmt.Errorf("%s: %w", context, err)
 }
 
-// Create inserta un nuevo evento (VERSIÓN MEJORADA CON SERIALIZACIÓN JSON)
+// Create inserta un nuevo evento
 func (r *EventRepository) Create(ctx context.Context, event *entities.Event) error {
-	// Serializar campos JSON
 	galleryImagesJSON, err := json.Marshal(event.GalleryImages)
 	if err != nil {
 		return fmt.Errorf("failed to marshal gallery images: %w", err)
@@ -83,6 +80,7 @@ func (r *EventRepository) Create(ctx context.Context, event *entities.Event) err
 			cover_image_url, banner_image_url, gallery_images,
 			timezone, starts_at, ends_at, doors_open_at, doors_close_at,
 			venue_name, address_full, city, state, country,
+			latitude, longitude,
 			status, visibility, is_featured, is_free,
 			max_attendees, min_attendees, tags, age_restriction,
 			requires_approval, allow_reservations, reservation_duration_minutes,
@@ -95,12 +93,13 @@ func (r *EventRepository) Create(ctx context.Context, event *entities.Event) err
 			$9, $10, $11,
 			$12, $13, $14, $15, $16,
 			$17, $18, $19, $20, $21,
-			$22, $23, $24, $25,
-			$26, $27, $28, $29,
-			$30, $31, $32,
+			$22, $23,
+			$24, $25, $26, $27,
+			$28, $29, $30, $31,
+			$32, $33, $34,
 			0, 0, 0,
-			$33, $34, $35,
-			$36, NOW(), NOW()
+			$35, $36, $37,
+			$38, NOW(), NOW()
 		)
 		RETURNING id, public_uuid, created_at, updated_at
 	`
@@ -127,6 +126,8 @@ func (r *EventRepository) Create(ctx context.Context, event *entities.Event) err
 		event.City,
 		event.State,
 		event.Country,
+		event.Latitude,
+		event.Longitude,
 		event.Status,
 		event.Visibility,
 		event.IsFeatured,
@@ -160,6 +161,7 @@ func (r *EventRepository) GetByID(ctx context.Context, id int64) (*entities.Even
 			cover_image_url, banner_image_url, gallery_images,
 			timezone, starts_at, ends_at, doors_open_at, doors_close_at,
 			venue_name, address_full, city, state, country,
+			latitude, longitude,
 			status, visibility, is_featured, is_free,
 			max_attendees, min_attendees, tags, age_restriction,
 			requires_approval, allow_reservations, reservation_duration_minutes,
@@ -176,6 +178,7 @@ func (r *EventRepository) GetByID(ctx context.Context, id int64) (*entities.Even
 	var coverImageURL, bannerImageURL, venueName, addressFull, city, state, country, metaTitle, metaDescription *string
 	var shortDescription, description, eventType *string
 	var doorsOpenAt, doorsCloseAt, publishedAt *time.Time
+	var eventLatitude, eventLongitude *float64
 
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&event.ID, &event.PublicID, &organizerID, &primaryCategoryID, &venueID,
@@ -183,6 +186,7 @@ func (r *EventRepository) GetByID(ctx context.Context, id int64) (*entities.Even
 		&coverImageURL, &bannerImageURL, &galleryImagesJSON,
 		&event.Timezone, &event.StartsAt, &event.EndsAt, &doorsOpenAt, &doorsCloseAt,
 		&venueName, &addressFull, &city, &state, &country,
+		&eventLatitude, &eventLongitude,
 		&event.Status, &event.Visibility, &event.IsFeatured, &event.IsFree,
 		&event.MaxAttendees, &event.MinAttendees, &tagsJSON, &event.AgeRestriction,
 		&event.RequiresApproval, &event.AllowReservations, &event.ReservationDuration,
@@ -218,6 +222,13 @@ func (r *EventRepository) GetByID(ctx context.Context, id int64) (*entities.Even
 	event.DoorsCloseAt = doorsCloseAt
 	event.PublishedAt = publishedAt
 
+	if eventLatitude != nil {
+		event.Latitude = eventLatitude
+	}
+	if eventLongitude != nil {
+		event.Longitude = eventLongitude
+	}
+
 	// Deserializar JSON
 	if len(galleryImagesJSON) > 0 {
 		json.Unmarshal(galleryImagesJSON, &event.GalleryImages)
@@ -241,6 +252,7 @@ func (r *EventRepository) GetByPublicID(ctx context.Context, publicID string) (*
 			cover_image_url, banner_image_url, gallery_images,
 			timezone, starts_at, ends_at, doors_open_at, doors_close_at,
 			venue_name, address_full, city, state, country,
+			latitude, longitude,
 			status, visibility, is_featured, is_free,
 			max_attendees, min_attendees, tags, age_restriction,
 			requires_approval, allow_reservations, reservation_duration_minutes,
@@ -257,6 +269,7 @@ func (r *EventRepository) GetByPublicID(ctx context.Context, publicID string) (*
 	var coverImageURL, bannerImageURL, venueName, addressFull, city, state, country, metaTitle, metaDescription *string
 	var shortDescription, description, eventType *string
 	var doorsOpenAt, doorsCloseAt, publishedAt *time.Time
+	var eventLatitude, eventLongitude *float64
 
 	err := r.db.QueryRow(ctx, query, publicID).Scan(
 		&event.ID, &event.PublicID, &organizerID, &primaryCategoryID, &venueID,
@@ -264,6 +277,7 @@ func (r *EventRepository) GetByPublicID(ctx context.Context, publicID string) (*
 		&coverImageURL, &bannerImageURL, &galleryImagesJSON,
 		&event.Timezone, &event.StartsAt, &event.EndsAt, &doorsOpenAt, &doorsCloseAt,
 		&venueName, &addressFull, &city, &state, &country,
+		&eventLatitude, &eventLongitude,
 		&event.Status, &event.Visibility, &event.IsFeatured, &event.IsFree,
 		&event.MaxAttendees, &event.MinAttendees, &tagsJSON, &event.AgeRestriction,
 		&event.RequiresApproval, &event.AllowReservations, &event.ReservationDuration,
@@ -299,6 +313,13 @@ func (r *EventRepository) GetByPublicID(ctx context.Context, publicID string) (*
 	event.DoorsCloseAt = doorsCloseAt
 	event.PublishedAt = publishedAt
 
+	if eventLatitude != nil {
+		event.Latitude = eventLatitude
+	}
+	if eventLongitude != nil {
+		event.Longitude = eventLongitude
+	}
+
 	// Deserializar JSON
 	if len(galleryImagesJSON) > 0 {
 		json.Unmarshal(galleryImagesJSON, &event.GalleryImages)
@@ -322,6 +343,7 @@ func (r *EventRepository) GetBySlug(ctx context.Context, slug string) (*entities
 			cover_image_url, banner_image_url, gallery_images,
 			timezone, starts_at, ends_at, doors_open_at, doors_close_at,
 			venue_name, address_full, city, state, country,
+			latitude, longitude,
 			status, visibility, is_featured, is_free,
 			max_attendees, min_attendees, tags, age_restriction,
 			requires_approval, allow_reservations, reservation_duration_minutes,
@@ -338,6 +360,7 @@ func (r *EventRepository) GetBySlug(ctx context.Context, slug string) (*entities
 	var coverImageURL, bannerImageURL, venueName, addressFull, city, state, country, metaTitle, metaDescription *string
 	var shortDescription, description, eventType *string
 	var doorsOpenAt, doorsCloseAt, publishedAt *time.Time
+	var eventLatitude, eventLongitude *float64
 
 	err := r.db.QueryRow(ctx, query, slug).Scan(
 		&event.ID, &event.PublicID, &organizerID, &primaryCategoryID, &venueID,
@@ -345,6 +368,7 @@ func (r *EventRepository) GetBySlug(ctx context.Context, slug string) (*entities
 		&coverImageURL, &bannerImageURL, &galleryImagesJSON,
 		&event.Timezone, &event.StartsAt, &event.EndsAt, &doorsOpenAt, &doorsCloseAt,
 		&venueName, &addressFull, &city, &state, &country,
+		&eventLatitude, &eventLongitude,
 		&event.Status, &event.Visibility, &event.IsFeatured, &event.IsFree,
 		&event.MaxAttendees, &event.MinAttendees, &tagsJSON, &event.AgeRestriction,
 		&event.RequiresApproval, &event.AllowReservations, &event.ReservationDuration,
@@ -380,6 +404,13 @@ func (r *EventRepository) GetBySlug(ctx context.Context, slug string) (*entities
 	event.DoorsCloseAt = doorsCloseAt
 	event.PublishedAt = publishedAt
 
+	if eventLatitude != nil {
+		event.Latitude = eventLatitude
+	}
+	if eventLongitude != nil {
+		event.Longitude = eventLongitude
+	}
+
 	// Deserializar JSON
 	if len(galleryImagesJSON) > 0 {
 		json.Unmarshal(galleryImagesJSON, &event.GalleryImages)
@@ -396,7 +427,6 @@ func (r *EventRepository) GetBySlug(ctx context.Context, slug string) (*entities
 
 // Update actualiza evento
 func (r *EventRepository) Update(ctx context.Context, event *entities.Event) error {
-	// Serializar campos JSON para la actualización
 	tagsJSON, err := json.Marshal(event.Tags)
 	if err != nil {
 		return fmt.Errorf("failed to marshal tags: %w", err)
@@ -419,19 +449,21 @@ func (r *EventRepository) Update(ctx context.Context, event *entities.Event) err
 			city = $8, 
 			state = $9, 
 			country = $10,
-			starts_at = $11, 
-			ends_at = $12, 
-			doors_open_at = $13, 
-			doors_close_at = $14,
-			status = $15, 
-			visibility = $16, 
-			is_featured = $17, 
-			is_free = $18,
-			max_attendees = $19, 
-			tags = $20, 
-			settings = $21,
+			latitude = $11,
+			longitude = $12,
+			starts_at = $13, 
+			ends_at = $14, 
+			doors_open_at = $15, 
+			doors_close_at = $16,
+			status = $17, 
+			visibility = $18, 
+			is_featured = $19, 
+			is_free = $20,
+			max_attendees = $21, 
+			tags = $22, 
+			settings = $23,
 			updated_at = NOW()
-		WHERE id = $22
+		WHERE id = $24
 		RETURNING updated_at
 	`
 
@@ -446,6 +478,8 @@ func (r *EventRepository) Update(ctx context.Context, event *entities.Event) err
 		event.City,
 		event.State,
 		event.Country,
+		event.Latitude,
+		event.Longitude,
 		event.StartsAt,
 		event.EndsAt,
 		event.DoorsOpenAt,
@@ -557,6 +591,7 @@ func (r *EventRepository) List(ctx context.Context, filter map[string]interface{
 			cover_image_url, banner_image_url, gallery_images,
 			timezone, starts_at, ends_at, doors_open_at, doors_close_at,
 			venue_name, address_full, city, state, country,
+			latitude, longitude,
 			status, visibility, is_featured, is_free,
 			max_attendees, min_attendees, tags, age_restriction,
 			requires_approval, allow_reservations, reservation_duration_minutes,
@@ -586,6 +621,7 @@ func (r *EventRepository) List(ctx context.Context, filter map[string]interface{
 		var coverImageURL, bannerImageURL, venueName, addressFull, city, state, country, metaTitle, metaDescription *string
 		var shortDescription, description, eventType *string
 		var doorsOpenAt, doorsCloseAt, publishedAt *time.Time
+		var eventLatitude, eventLongitude *float64
 
 		err = rows.Scan(
 			&event.ID, &event.PublicID, &organizerID, &primaryCategoryID, &venueID,
@@ -593,6 +629,7 @@ func (r *EventRepository) List(ctx context.Context, filter map[string]interface{
 			&coverImageURL, &bannerImageURL, &galleryImagesJSON,
 			&event.Timezone, &event.StartsAt, &event.EndsAt, &doorsOpenAt, &doorsCloseAt,
 			&venueName, &addressFull, &city, &state, &country,
+			&eventLatitude, &eventLongitude,
 			&event.Status, &event.Visibility, &event.IsFeatured, &event.IsFree,
 			&event.MaxAttendees, &event.MinAttendees, &tagsJSON, &event.AgeRestriction,
 			&event.RequiresApproval, &event.AllowReservations, &event.ReservationDuration,
@@ -623,6 +660,13 @@ func (r *EventRepository) List(ctx context.Context, filter map[string]interface{
 		event.DoorsOpenAt = doorsOpenAt
 		event.DoorsCloseAt = doorsCloseAt
 		event.PublishedAt = publishedAt
+
+		if eventLatitude != nil {
+			event.Latitude = eventLatitude
+		}
+		if eventLongitude != nil {
+			event.Longitude = eventLongitude
+		}
 
 		// Deserializar JSON
 		if len(galleryImagesJSON) > 0 {

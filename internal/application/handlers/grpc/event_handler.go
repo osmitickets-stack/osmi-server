@@ -335,6 +335,13 @@ func (h *EventHandler) eventToProto(event *entities.Event) *osmi.EventResponse {
 		resp.MaxAttendees = int32(*event.MaxAttendees)
 	}
 
+	if event.Latitude != nil {
+		resp.Latitude = *event.Latitude
+	}
+	if event.Longitude != nil {
+		resp.Longitude = *event.Longitude
+	}
+
 	resp.TotalTickets = 0
 	resp.TicketsSold = 0
 

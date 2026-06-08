@@ -172,11 +172,13 @@ func (h *UserHandler) Login(ctx context.Context, req *osmi.LoginRequest) (*osmi.
 
 	expiresAt := time.Now().Add(24 * time.Hour)
 	claims := jwt.MapClaims{
-		"user_id": user.PublicID,
-		"email":   user.Email,
-		"role":    user.Role,
-		"exp":     expiresAt.Unix(),
-		"iat":     time.Now().Unix(),
+		"user_id":      user.PublicID,
+		"email":        user.Email,
+		"role":         user.Role,
+		"is_staff":     user.IsStaff,
+		"is_superuser": user.IsSuperuser,
+		"exp":          expiresAt.Unix(),
+		"iat":          time.Now().Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
