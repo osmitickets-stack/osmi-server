@@ -1,5 +1,5 @@
 # Osmi Server
-Backend gRPC para la plataforma Osmi. Este módulo implementa el núcleo del sistema de boletaje digital utilizando una arquitectura escalable, segura y profesional. Incluye servicios gRPC completos, integración con PostgreSQL, y health checks.
+Backend gRPC para la plataforma osmi. Este módulo implementa el núcleo del sistema de boletaje digital utilizando una arquitectura escalable, segura y profesional. Incluye servicios gRPC completos, integración con PostgreSQL, y health checks.
 ---
 
 # Osmi Core Stack
@@ -19,6 +19,8 @@ Health & Readiness Probes → verificación de estado del sistema
 ```bash
 osmi-server/
 ├── cmd/
+│   └── worker/
+│   │   ├── main.go
 │   └── main.go                              # Punto de entrada de la aplicación
 ├── config/                                  # Archivos de configuración YAML
 │   ├── deployment.yaml
@@ -102,6 +104,7 @@ osmi-server/
 │   │   │   │   ├── filter.go             #
 │   │   │   │   ├── request.go         #  
 │   │   │   │   ├── response.go           #
+│   │   │   ├── dto.go
 │   │   ├── grpc/                            # Servidor y configuración gRPC
 │   │   │   ├── interceptors/                # Interceptores/middleware gRPC
 │   │   │   │   ├── auth_interceptor.go      # Interceptor de autenticación JWT
@@ -118,9 +121,12 @@ osmi-server/
 │   │   │   │   ├── customer_handler.go      # Handler de clientes (gRPC)
 │   │   │   │   ├── event_handler.go         # Handler de eventos (gRPC)
 │   │   │   │   ├── handler.go              # unificado que implementa OsmiServiceServer con todos los métodos.
+│   │   │   │   ├── order_handler.go
+│   │   │   │   ├── payment_handler.go
 │   │   │   │   ├── ticket_handler.go        # Handler de tickets (gRPC)
 │   │   │   │   ├── ticket_type_handler.go      # Handler de tipos de tickets (gRPC)
 │   │   │   │   └── user_handler.go          # Handler de usuarios (gRPC)
+│   │   │   │   └── webhook_handler.go
 │   │   │   └── http/                       # Handlers para HTTP REST
 │   │   │       ├── event_handler.go         # Handler de eventos (HTTP)
 │   │   │       └── ticket_handler.go        # Handler de tickets (HTTP)
@@ -128,7 +134,9 @@ osmi-server/
 │   │       ├── category_service.go          # Servicio de gestión de categorías
 │   │       ├── customer_service.go          # Servicio de gestión de clientes
 │   │       ├── event_service.go             # Servicio de gestión de eventos
-│   │       ├── service.go
+│   │       ├── order_service.go
+│   │       ├── payment_service.go 
+│   │       ├── services.go
 │   │       ├── ticket_service.go            # Servicio de gestión de tickets
 │   │       ├── ticket_type_service.go
 │   │       └── user_service.go              # Servicio de gestión de usuarios
@@ -151,7 +159,6 @@ osmi-server/
 │   │   │   ├── notification.go            # Entidad: Notificaciones enviadas a usuarios
 │   │   │   ├── notification_template.go   # Entidad: Plantillas de notificación
 │   │   │   ├── order.go                   # Entidad: Órdenes de compra del sistema de billing
-│   │   │   ├── order_item.go              # Entidad: Items dentro de una orden
 │   │   │   ├── organizer.go               # Entidad: Organizadores de eventos
 │   │   │   ├── payment.go                 # Entidad: Pagos procesados
 │   │   │   ├── payment_provider.go        # Entidad: Proveedores de servicios de pago
@@ -161,6 +168,7 @@ osmi-server/
 │   │   │   ├── ticket_type.go             # Entidad: Tipos/configuraciones de tickets
 │   │   │   ├── user.go                    # Entidad: Usuarios del sistema de autenticación
 │   │   │   ├── venue.go                   # Entidad: Lugares o recintos para eventos
+│   │   │   └── webhook_stats.go           #
 │   │   │   └── webhook.go                 # Entidad: Webhooks configurados para integraciones
 │   │   ├── enums/                         # Enumeraciones del dominio
 │   │   │   ├── audit_severity.go          # Enum: Niveles de severidad para logs de auditoría
@@ -179,6 +187,7 @@ osmi-server/
 │   │   │   ├── category_repository.go     # Interfaz: Repositorio de categorías
 │   │   │   ├── country_config_repository.go # Interfaz: Repositorio de configuración por país
 │   │   │   ├── customer_repository.go     # Interfaz: Repositorio de clientes
+│   │   │   ├── errors
 │   │   │   ├── event_repository.go        # Interfaz: Repositorio de eventos
 │   │   │   ├── invoice_repository.go      # Interfaz: Repositorio de facturas
 │   │   │   ├── notification_repository.go # Interfaz: Repositorio de notificaciones
@@ -204,12 +213,17 @@ osmi-server/
 │   │   ├── cache/                         # Sistema de caché distribuido
 │   │   │   ├── cache_service.go           # Servicio abstracto de caché
 │   │   │   └── redis_client.go            # Implementación con Redis
+│   │   ├── email/                         # 
+│   │   │   ├── ses_client.go
 │   │   ├── messaging/                     # Sistema de mensajería y notificaciones
 │   │   │   ├── email_sender.go            # Servicio de envío de emails (SMTP/SendGrid)
 │   │   │   └── notification_service.go    # Servicio unificado de notificaciones
 │   │   ├── payment/                       # Sistema de procesamiento de pagos
 │   │   │   ├── payment_gateway.go         # Interfaz abstracta de gateway de pagos
+│   │   │   └── stripe_client.go
 │   │   │   └── stripe_service.go          # Implementación con Stripe API
+│   │   ├── qr/
+│   │   │   ├── qr_generator.go
 │   │   └── repositories/                  # Implementaciones de repositorios (adaptadores)
 │   │       ├── inmemory/                  # Repositorios en memoria para testing
 │   │       └── postgres/                  # Repositorios PostgreSQL (implementaciones reales)
@@ -241,14 +255,20 @@ osmi-server/
 │   │           ├── category_repository.go        # Implementación PostgreSQL de repositorio de categorías
 │   │           ├── customer_repository.go        # Implementación PostgreSQL de repositorio de clientes
 │   │           ├── event_repository.go           # Implementación PostgreSQL de repositorio de eventos
+│   │           ├── order_repository.go
 │   │           ├── organizer_repository.go       # 
+│   │           ├── payment_repository.go
 │   │           ├── ticket_repository.go          # Implementación PostgreSQL de repositorio de tickets
 │   │           ├── ticket_type_repository.go     # 
 │   │           └── user_repository.go            # Implementación PostgreSQL de repositorio de usuarios
 │   │           ├── venue_repository.go           # 
-│   └── repository/                         # 
-│   │   ├── testdb/                       #
-│       │   ├── testdb.go                  # 
+│   └── repository/                               # 
+│   │   ├── testdb/                               #
+│   │   │   ├── CUSTOMERS-STATUS.md               # 
+│   │   │   ├── STATUS.md                         # 
+│   │   │   ├── test-customers-fixed.sh           # 
+│   │   │   ├── test-customers.sh                         # 
+│   │   │   ├── testdb.go                         # 
 │   └── shared/                            # Utilidades compartidas entre capas
 │       ├── errors/                        # Manejo estructurado de errores
 │       │   ├── app_error.go               # Error personalizado de aplicación con contexto
@@ -266,7 +286,6 @@ osmi-server/
 │           └── password_validator.go
 │           ├── phone_validator.go
 │           └── timezone_validator.go
-|
 ├── k8s/                                   # Configuración Kubernetes (manifests YAML)
     ├── base/                    # Configuraciones base (opcional, si usas Kustomize)
     ├── overlays/
@@ -288,8 +307,6 @@ osmi-server/
         ├── configmap.yaml
         └── ingress.yaml
 ├── scripts/                               # Scripts de automatización y utilidad
-│   ├── generate_proto.bat                 # Script para generar código gRPC (Windows)
-│   ├── generate_proto.sh                  # Script para generar código gRPC (Linux/Mac)
 │   ├── migrate.sh                         # Script para ejecutar migraciones de base de datos
 │   └── seed.sh                            # Script para poblar base de datos con datos iniciales
 ├── tests/                                 # Pruebas automatizadas
@@ -317,6 +334,9 @@ osmi-server/
 │               ├── ticket_repository_test.go
 │               └── user_repository_test.go
 ├── shared-protobuf/
+│   └── osmi_grpc.pb.go
+│   └── osmi.pb.go  
+│   └── osmi.pb.gw.go  
 ├── .dockerignore                          # Archivos a ignorar en builds Docker
 ├── .env                                   # Variables de entorno para desarrollo local
 ├── .env.development                       # Variables de entorno para entorno de desarrollo
@@ -331,28 +351,11 @@ osmi-server/
 ├── fix-imports.sh                         #
 ├── fix-packages.sh                        #
 ├── go.mod                                 # Definición de módulo Go y dependencias
+├── go.sum 
 ├── LICENSE                                # Licencia del software (MIT, Apache, etc.)
+├── main.exe
 ├── README.md                              # Documentación principal del proyecto
 └── test_apis.sh                           #
-```
-
-# Ejecución local
-```
-Requisitos:
-Go 1.21+
-PostgreSQL ejecutándose
-Variables de entorno configuradas en .env
-
-# Instalar dependencias
-go mod tidy
-
-# Generar código protobuf (Windows)
-generate_proto_fixed.bat
-
-# Ejecutar servidor
-go run cmd/main.go
-
-El servidor estará disponible en: localhost:50051
 ```
 
 ## Ejecución con Docker
@@ -379,34 +382,6 @@ service OsmiService {
 }
 ```
 
-## Endpoints REST vía grpc-gateway
-```
-Método	Ruta	Descripción
-POST	/users	Crear usuario
-POST	/tickets	Crear ticket
-POST	/customers	Crear cliente
-GET	/customers/{id}	Obtener cliente por ID
-```
-
-### Health & Readiness
-```
-GET /health → Verifica conexión a base de datos
-GET /ready → Verifica estado de conexión y estadísticas
-Disponibles en: http://localhost:8081
-```
-
-## Generación de Código Proto
-### Después de modificar proto/osmi.proto, ejecutar:
-
-```bash
-generate_proto_fixed.bat
-Este script genera código para:
-
-osmi-server: Servidor gRPC en gen/
-
-osmi-gateway: Gateway HTTP en ../osmi-gateway/gen/
-```
-
 ## Estado actual
 ### Completado
 Servidor gRPC completamente funcional en puerto 50051
@@ -429,71 +404,6 @@ DATABASE_URL=postgresql://user:pass@host:port/db
 GRPC_PORT=50051
 HEALTH_PORT=8081
 ```
-
-## COMANDOS EXACTOS PARA REGENERAR CÓDIGO gRPC
-📁 PRIMERO: En el SERVIDOR (osmi-server)
-bash
-# 1. Navegar al directorio del servidor
-cd /c/Users/Desfragmentado/Desktop/Servidor/osmi/osmi-server
-
-# 2. Verificar que tienes el proto actualizado
-ls -la proto/osmi.proto
-
-# 3. Regenerar TODO el código gRPC (esto creará/actualizará los archivos en gen/)
-protoc \
-  --go_out=. \
-  --go-grpc_out=. \
-  --go_opt=paths=source_relative \
-  --go-grpc_opt=paths=source_relative \
-  --grpc-gateway_out=. \
-  --grpc-gateway_opt=paths=source_relative \
-  -I=./proto \
-  -I=./proto/googleapis \
-  proto/osmi.proto
-
-# 4. Verificar que se generaron los archivos
-ls -la gen/
-
-# Deberías ver estos archivos actualizados:
-# osmi.pb.go
-# osmi_grpc.pb.go  
-# osmi.pb.gw.go
-📁 SEGUNDO: En el GATEWAY (osmi-gateway)
-bash
-# 1. Navegar al directorio del gateway
-cd /c/Users/Desfragmentado/Desktop/Servidor/osmi/osmi-gateway
-
-# 2. COPIAR el proto actualizado del servidor al gateway (IMPORTANTE!)
-cp ../osmi-server/proto/osmi.proto proto/
-cp -r ../osmi-server/proto/googleapis proto/
-
-# 3. Regenerar el código del gateway
-protoc \
-  --go_out=. \
-  --go-grpc_out=. \
-  --go_opt=paths=source_relative \
-  --go-grpc_opt=paths=source_relative \
-  --grpc-gateway_out=. \
-  --grpc-gateway_opt=paths=source_relative \
-  -I=./proto \
-  -I=./proto/googleapis \
-  proto/osmi.proto
-
-# 4. Verificar que se generaron los archivos
-ls -la gen/
-🔧 TERCERO: Limpiar y recompilar AMBOS proyectos
-bash
-# En el SERVIDOR
-cd /c/Users/Desfragmentado/Desktop/Servidor/osmi/osmi-server
-go clean -cache
-go mod tidy
-go build -o osmi-server cmd/main.go
-
-# En el GATEWAY  
-cd /c/Users/Desfragmentado/Desktop/Servidor/osmi/osmi-gateway
-go clean -cache
-go mod tidy
-go build -o osmi-gateway cmd/main.go
 
 # Autor
 ### Francisco David Zamora Urrutia Fullstack Developer · Systems Architect · Lyricist
