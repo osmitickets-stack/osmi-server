@@ -24,7 +24,6 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 
 COPY --from=builder /app/osmi-server/server .
-COPY --from=builder /app/osmi-server/.env.production ./.env
 
 EXPOSE 50051
 
