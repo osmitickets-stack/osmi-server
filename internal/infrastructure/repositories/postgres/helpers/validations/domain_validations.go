@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // DomainValidator valida entidades de dominio

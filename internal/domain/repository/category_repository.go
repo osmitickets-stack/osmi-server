@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 type CategoryFilter struct {

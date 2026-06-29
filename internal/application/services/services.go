@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	osmi "github.com/franciscozamorau/osmi-protobuf/gen/pb"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/enums"
-	"github.com/franciscozamorau/osmi-server/internal/domain/repository"
 	"github.com/google/uuid"
+	osmi "github.com/osmitickets-stack/osmi-protobuf/gen/pb"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/enums"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

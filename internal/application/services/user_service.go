@@ -8,12 +8,12 @@ import (
 	"log"
 	"time"
 
-	userdto "github.com/franciscozamorau/osmi-server/internal/api/dto/user"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/repository"
-	"github.com/franciscozamorau/osmi-server/internal/infrastructure/cache"
-	"github.com/franciscozamorau/osmi-server/internal/shared/security"
 	"github.com/google/uuid"
+	userdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/user"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
+	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/cache"
+	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
 )
 
 type UserService struct {

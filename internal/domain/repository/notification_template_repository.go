@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // NotificationTemplateRepository define operaciones para plantillas de notificación

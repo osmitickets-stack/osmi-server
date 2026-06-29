@@ -10,7 +10,7 @@ echo ""
 
 # 1. Encontrar TODOS los archivos con import incorrecto
 echo "📋 Buscando imports a corregir..."
-INCORRECT_IMPORTS=$(grep -r '"github.com/franciscozamorau/osmi-server/internal/api/dto"' internal/ --include="*.go" | wc -l)
+INCORRECT_IMPORTS=$(grep -r '"github.com/osmitickets-stack/osmi-server/internal/api/dto"' internal/ --include="*.go" | wc -l)
 echo "   Se encontraron $INCORRECT_IMPORTS imports incorrectos"
 
 # 2. Corregir imports en handlers
@@ -21,7 +21,7 @@ echo "🔄 Corrigiendo handlers..."
 if [ -f "internal/application/handlers/grpc/ticket_handler.go" ]; then
     echo "  📝 Corrigiendo ticket_handler.go"
     sed -i.bak '
-        s|"github.com/franciscozamorau/osmi-server/internal/api/dto"|"github.com/franciscozamorau/osmi-server/internal/api/dto/request"\n\t"github.com/franciscozamorau/osmi-server/internal/api/dto/response"|g
+        s|"github.com/osmitickets-stack/osmi-server/internal/api/dto"|"github.com/osmitickets-stack/osmi-server/internal/api/dto/request"\n\t"github.com/osmitickets-stack/osmi-server/internal/api/dto/response"|g
     ' internal/application/handlers/grpc/ticket_handler.go
     
     # Cambiar dto. -> request. o response. según corresponda
@@ -38,9 +38,9 @@ fi
 # Customer Handler (ya lo corregimos, pero verificar)
 if [ -f "internal/application/handlers/grpc/customer_handler.go" ]; then
     echo "  📝 Verificando customer_handler.go"
-    if grep -q '"github.com/franciscozamorau/osmi-server/internal/api/dto"' internal/application/handlers/grpc/customer_handler.go; then
+    if grep -q '"github.com/osmitickets-stack/osmi-server/internal/api/dto"' internal/application/handlers/grpc/customer_handler.go; then
         sed -i.bak '
-            s|"github.com/franciscozamorau/osmi-server/internal/api/dto"|"github.com/franciscozamorau/osmi-server/internal/api/dto/request"\n\t"github.com/franciscozamorau/osmi-server/internal/api/dto/response"|g
+            s|"github.com/osmitickets-stack/osmi-server/internal/api/dto"|"github.com/osmitickets-stack/osmi-server/internal/api/dto/request"\n\t"github.com/osmitickets-stack/osmi-server/internal/api/dto/response"|g
         ' internal/application/handlers/grpc/customer_handler.go
         rm -f internal/application/handlers/grpc/customer_handler.go.bak
     fi
@@ -54,7 +54,7 @@ echo "🔄 Corrigiendo services..."
 if [ -f "internal/application/services/customer_service.go" ]; then
     echo "  📝 Corrigiendo customer_service.go"
     sed -i.bak '
-        s|"github.com/franciscozamorau/osmi-server/internal/api/dto"|"github.com/franciscozamorau/osmi-server/internal/api/dto/request"\n\t"github.com/franciscozamorau/osmi-server/internal/api/dto/response"|g
+        s|"github.com/osmitickets-stack/osmi-server/internal/api/dto"|"github.com/osmitickets-stack/osmi-server/internal/api/dto/request"\n\t"github.com/osmitickets-stack/osmi-server/internal/api/dto/response"|g
         s/dto\.CreateCustomerRequest/request.CreateCustomerRequest/g
         s/dto\.UpdateCustomerRequest/request.UpdateCustomerRequest/g
         s/dto\.CustomerFilter/request.CustomerFilter/g
@@ -68,10 +68,10 @@ fi
 echo ""
 echo "🔄 Corrigiendo repositories..."
 find internal/infrastructure/repositories -name "*.go" -type f | while read file; do
-    if grep -q '"github.com/franciscozamorau/osmi-server/internal/api/dto"' "$file"; then
+    if grep -q '"github.com/osmitickets-stack/osmi-server/internal/api/dto"' "$file"; then
         echo "  📝 Corrigiendo $(basename "$file")"
         sed -i.bak '
-            s|"github.com/franciscozamorau/osmi-server/internal/api/dto"|"github.com/franciscozamorau/osmi-server/internal/api/dto/request"\n\t"github.com/franciscozamorau/osmi-server/internal/api/dto/response"|g
+            s|"github.com/osmitickets-stack/osmi-server/internal/api/dto"|"github.com/osmitickets-stack/osmi-server/internal/api/dto/request"\n\t"github.com/osmitickets-stack/osmi-server/internal/api/dto/response"|g
             s/dto\.CustomerFilter/request.CustomerFilter/g
             s/dto\.Pagination/request.Pagination/g
         ' "$file"
@@ -110,13 +110,13 @@ echo "  ✅ Archivo puente creado: internal/api/dto/dto.go"
 # 6. Verificar correcciones
 echo ""
 echo "🔍 Verificando correcciones..."
-REMAINING=$(grep -r '"github.com/franciscozamorau/osmi-server/internal/api/dto"' internal/ --include="*.go" | grep -v "dto.go" | wc -l)
+REMAINING=$(grep -r '"github.com/osmitickets-stack/osmi-server/internal/api/dto"' internal/ --include="*.go" | grep -v "dto.go" | wc -l)
 
 if [ "$REMAINING" -eq 0 ]; then
     echo "✅ ¡TODOS los imports han sido corregidos!"
 else
     echo "⚠️  Aún quedan $REMAINING imports por corregir manualmente:"
-    grep -r '"github.com/franciscozamorau/osmi-server/internal/api/dto"' internal/ --include="*.go" | grep -v "dto.go"
+    grep -r '"github.com/osmitickets-stack/osmi-server/internal/api/dto"' internal/ --include="*.go" | grep -v "dto.go"
 fi
 
 echo ""

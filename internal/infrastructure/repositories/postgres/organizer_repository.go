@@ -12,9 +12,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	organizerdto "github.com/franciscozamorau/osmi-server/internal/api/dto/organizer"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	organizerdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/organizer"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // OrganizerRepository implementa la interfaz repository.OrganizerRepository

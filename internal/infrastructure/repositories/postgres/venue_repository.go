@@ -13,10 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	venuedto "github.com/franciscozamorau/osmi-server/internal/api/dto/venue"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	venuedto "github.com/osmitickets-stack/osmi-server/internal/api/dto/venue"
 
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // VenueRepository implementa la interfaz repository.VenueRepository

@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/franciscozamorau/osmi-server/internal/api/dto"
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	eventdto "github.com/franciscozamorau/osmi-server/internal/api/dto/event"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/enums"
-	"github.com/franciscozamorau/osmi-server/internal/domain/repository"
 	"github.com/google/uuid"
+	"github.com/osmitickets-stack/osmi-server/internal/api/dto"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	eventdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/event"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/enums"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 )
 
 type EventService struct {

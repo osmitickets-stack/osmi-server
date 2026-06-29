@@ -5,7 +5,7 @@ import (
 	"context"
 	"log"
 
-	osmi "github.com/franciscozamorau/osmi-protobuf/gen/pb"
+	osmi "github.com/osmitickets-stack/osmi-protobuf/gen/pb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

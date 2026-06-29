@@ -18,6 +18,11 @@ Health & Readiness Probes → verificación de estado del sistema
 # Estructura del proyecto
 ```bash
 osmi-server/
+├── .github/
+│    └── workflows/
+│    │  ├── ci.yml         ← pruebas (go test, go vet, etc.)
+│    │  ├── docker.yml     ← build + push a GHCR
+│    │  └── deploy.yml     ← despliegue automático a EC2
 ├── cmd/
 │   └── worker/
 │   │   ├── main.go
@@ -333,10 +338,6 @@ osmi-server/
 │               ├── event_repository_test.go
 │               ├── ticket_repository_test.go
 │               └── user_repository_test.go
-├── shared-protobuf/
-│   └── osmi_grpc.pb.go
-│   └── osmi.pb.go  
-│   └── osmi.pb.gw.go  
 ├── .dockerignore                          # Archivos a ignorar en builds Docker
 ├── .env                                   # Variables de entorno para desarrollo local
 ├── .env.development                       # Variables de entorno para entorno de desarrollo

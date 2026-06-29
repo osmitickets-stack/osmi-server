@@ -4,10 +4,10 @@ package repository
 import (
 	"context"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	orderdto "github.com/franciscozamorau/osmi-server/internal/api/dto/order"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
 	"github.com/jackc/pgx/v5"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	orderdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/order"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // OrderRepository define operaciones para órdenes

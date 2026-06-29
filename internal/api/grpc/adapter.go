@@ -2,9 +2,9 @@
 package grpc
 
 import (
-	"github.com/franciscozamorau/osmi-protobuf/gen/pb"
-	"github.com/franciscozamorau/osmi-server/internal/api/dto"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-protobuf/gen/pb"
+	"github.com/osmitickets-stack/osmi-server/internal/api/dto"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

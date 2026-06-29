@@ -12,9 +12,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/enums"
-	"github.com/franciscozamorau/osmi-server/internal/domain/repository"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/enums"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 )
 
 // UserRepository implementa la interfaz repository.UserRepository usando PostgreSQL

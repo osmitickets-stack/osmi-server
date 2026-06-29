@@ -12,8 +12,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
 
-	pb "github.com/franciscozamorau/osmi-protobuf/gen/pb"
-	"github.com/franciscozamorau/osmi-server/internal/config"
+	pb "github.com/osmitickets-stack/osmi-protobuf/gen/pb"
+	"github.com/osmitickets-stack/osmi-server/internal/config"
 )
 
 type Server struct {

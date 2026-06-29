@@ -4,9 +4,9 @@ package repository
 import (
 	"context"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	invoicedto "github.com/franciscozamorau/osmi-server/internal/api/dto/invoice"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	invoicedto "github.com/osmitickets-stack/osmi-server/internal/api/dto/invoice"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // InvoiceRepository define operaciones para facturas

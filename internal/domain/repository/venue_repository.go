@@ -4,9 +4,9 @@ package repository
 import (
 	"context"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	venuedto "github.com/franciscozamorau/osmi-server/internal/api/dto/venue"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	venuedto "github.com/osmitickets-stack/osmi-server/internal/api/dto/venue"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // VenueRepository define operaciones para lugares/recintos

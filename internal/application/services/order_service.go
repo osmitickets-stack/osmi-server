@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	orderdto "github.com/franciscozamorau/osmi-server/internal/api/dto/order"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/repository"
 	"github.com/google/uuid"
+	orderdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/order"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 )
 
 type OrderService struct {

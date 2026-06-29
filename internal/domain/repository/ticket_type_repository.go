@@ -4,10 +4,10 @@ package repository
 import (
 	"context"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	tickettypedto "github.com/franciscozamorau/osmi-server/internal/api/dto/ticket_type"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
 	"github.com/jackc/pgx/v5"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	tickettypedto "github.com/osmitickets-stack/osmi-server/internal/api/dto/ticket_type"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // TicketTypeRepository define operaciones para tipos de ticket

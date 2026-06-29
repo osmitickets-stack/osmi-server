@@ -3,8 +3,8 @@ package grpc
 import (
 	"context"
 
-	osmi "github.com/franciscozamorau/osmi-protobuf/gen/pb"
-	"github.com/franciscozamorau/osmi-server/internal/application/services"
+	osmi "github.com/osmitickets-stack/osmi-protobuf/gen/pb"
+	"github.com/osmitickets-stack/osmi-server/internal/application/services"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

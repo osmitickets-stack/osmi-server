@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // CustomerFilter encapsula TODOS los criterios de búsqueda para clientes

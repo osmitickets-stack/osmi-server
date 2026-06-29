@@ -4,9 +4,9 @@ package repository
 import (
 	"context"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	paymentdto "github.com/franciscozamorau/osmi-server/internal/api/dto/payment"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	paymentdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/payment"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // PaymentRepository define operaciones para pagos

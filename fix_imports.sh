@@ -6,7 +6,7 @@ find internal/infrastructure/repositories/postgres -name "*.go" | while read fil
     echo "Corrigiendo: $file"
     
     # Reemplazar imports incorrectos
-    sed -i 's|github.com/franciscozamorau/osmi-server/repositories/postgres/helpers/|github.com/franciscozamorau/osmi-server/internal/infrastructure/repositories/postgres/helpers/|g' "$file"
+    sed -i 's|github.com/osmitickets-stack/osmi-server/repositories/postgres/helpers/|github.com/osmitickets-stack/osmi-server/internal/infrastructure/repositories/postgres/helpers/|g' "$file"
     
     # También corregir otras referencias si existen
     sed -i 's|repositories/postgres/helpers/|internal/infrastructure/repositories/postgres/helpers/|g' "$file"

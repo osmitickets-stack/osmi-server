@@ -6,9 +6,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/enums"
 	"github.com/jackc/pgx/v5"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/enums"
 )
 
 // TicketFilter encapsula TODOS los criterios de búsqueda para tickets

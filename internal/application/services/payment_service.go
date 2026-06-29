@@ -7,12 +7,12 @@ import (
 	"log"
 	"time"
 
-	paymentdto "github.com/franciscozamorau/osmi-server/internal/api/dto/payment"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/repository"
-	"github.com/franciscozamorau/osmi-server/internal/infrastructure/email"
-	"github.com/franciscozamorau/osmi-server/internal/infrastructure/payment"
-	"github.com/franciscozamorau/osmi-server/internal/infrastructure/qr"
+	paymentdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/payment"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
+	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/email"
+	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/payment"
+	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/qr"
 	"github.com/stripe/stripe-go/v83"
 	"github.com/stripe/stripe-go/v83/webhook"
 )

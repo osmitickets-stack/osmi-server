@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	categorydto "github.com/franciscozamorau/osmi-server/internal/api/dto/category"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/repository"
+	categorydto "github.com/osmitickets-stack/osmi-server/internal/api/dto/category"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 )
 
 type CategoryService struct {

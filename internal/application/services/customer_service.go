@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	customerdto "github.com/franciscozamorau/osmi-server/internal/api/dto/customer"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/repository"
 	"github.com/google/uuid"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	customerdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/customer"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 )
 
 // CreateCustomerRequest - Versión compatible con handler

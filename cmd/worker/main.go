@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/franciscozamorau/osmi-server/internal/database"
+	"github.com/osmitickets-stack/osmi-server/internal/database"
 )
 
 const (

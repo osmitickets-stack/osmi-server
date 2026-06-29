@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/franciscozamorau/osmi-server/internal/api/dto"
-	"github.com/franciscozamorau/osmi-server/internal/application/services"
-	"github.com/franciscozamorau/osmi-server/internal/shared/logger"
+	"github.com/osmitickets-stack/osmi-server/internal/api/dto"
+	"github.com/osmitickets-stack/osmi-server/internal/application/services"
+	"github.com/osmitickets-stack/osmi-server/internal/shared/logger"
 	"github.com/go-chi/chi/v5"
 )
 

@@ -4,9 +4,9 @@ package repository
 import (
 	"context"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	refunddto "github.com/franciscozamorau/osmi-server/internal/api/dto/refund"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	refunddto "github.com/osmitickets-stack/osmi-server/internal/api/dto/refund"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // RefundRepository define operaciones para reembolsos

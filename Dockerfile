@@ -1,30 +1,52 @@
+# ==========================
+# Builder
+# ==========================
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-COPY osmi-server/go.mod osmi-server/go.sum ./osmi-server/
-COPY osmi-protobuf/go.mod ./osmi-protobuf/
-COPY osmi-protobuf/go.sum ./osmi-protobuf/
-COPY osmi-protobuf/gen ./osmi-protobuf/gen
-COPY osmi-protobuf/proto ./osmi-protobuf/proto
+RUN apk add --no-cache git
 
-WORKDIR /app/osmi-server
+COPY go.mod go.sum ./
 
 RUN go mod download
 
-COPY osmi-server ./
+COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/main.go
+RUN CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64 \
+    go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o server \
+    ./cmd/main.go
 
+# ==========================
+# Runtime
+# ==========================
+FROM alpine:3.20
 
-FROM alpine:3.19
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    netcat-openbsd
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN addgroup -S osmi && adduser -S osmi -G osmi
 
 WORKDIR /app
 
-COPY --from=builder /app/osmi-server/server .
+COPY --from=builder /app/server .
+
+USER osmi
 
 EXPOSE 50051
+
+HEALTHCHECK \
+    --interval=30s \
+    --timeout=5s \
+    --start-period=10s \
+    --retries=3 \
+    CMD nc -z localhost 50051 || exit 1
 
 CMD ["./server"]

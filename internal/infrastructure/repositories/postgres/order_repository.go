@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	orderdto "github.com/franciscozamorau/osmi-server/internal/api/dto/order"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/repository"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	orderdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/order"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 )
 
 type OrderRepository struct {

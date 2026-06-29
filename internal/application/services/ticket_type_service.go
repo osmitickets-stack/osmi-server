@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"time"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	tickettypedto "github.com/franciscozamorau/osmi-server/internal/api/dto/ticket_type"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/repository"
 	"github.com/google/uuid"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	tickettypedto "github.com/osmitickets-stack/osmi-server/internal/api/dto/ticket_type"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 )
 
 type TicketTypeService struct {

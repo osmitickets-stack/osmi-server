@@ -4,11 +4,11 @@ package grpc
 import (
 	"context"
 
-	osmi "github.com/franciscozamorau/osmi-protobuf/gen/pb"
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	customerdto "github.com/franciscozamorau/osmi-server/internal/api/dto/customer"
-	"github.com/franciscozamorau/osmi-server/internal/api/helpers"
-	"github.com/franciscozamorau/osmi-server/internal/application/services"
+	osmi "github.com/osmitickets-stack/osmi-protobuf/gen/pb"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	customerdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/customer"
+	"github.com/osmitickets-stack/osmi-server/internal/api/helpers"
+	"github.com/osmitickets-stack/osmi-server/internal/application/services"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"

@@ -4,9 +4,9 @@ package repository
 import (
 	"context"
 
-	apicall "github.com/franciscozamorau/osmi-server/internal/api/dto/api_call"
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	apicall "github.com/osmitickets-stack/osmi-server/internal/api/dto/api_call"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // APICallRepository define operaciones para llamadas API de integración

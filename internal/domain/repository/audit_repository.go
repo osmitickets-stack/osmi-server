@@ -4,9 +4,9 @@ package repository
 import (
 	"context"
 
-	auditdto "github.com/franciscozamorau/osmi-server/internal/api/dto/audit"
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	auditdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/audit"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // AuditRepository define operaciones para auditoría

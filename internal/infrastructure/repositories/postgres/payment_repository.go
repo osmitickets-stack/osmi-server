@@ -5,12 +5,12 @@ import (
 	"errors"
 	"time"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	paymentdto "github.com/franciscozamorau/osmi-server/internal/api/dto/payment"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
-	"github.com/franciscozamorau/osmi-server/internal/domain/repository"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	paymentdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/payment"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 )
 
 type PaymentRepository struct {

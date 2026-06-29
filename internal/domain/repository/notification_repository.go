@@ -4,9 +4,9 @@ package repository
 import (
 	"context"
 
-	commondto "github.com/franciscozamorau/osmi-server/internal/api/dto/common"
-	notificationdto "github.com/franciscozamorau/osmi-server/internal/api/dto/notification"
-	"github.com/franciscozamorau/osmi-server/internal/domain/entities"
+	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
+	notificationdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/notification"
+	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 )
 
 // NotificationRepository define operaciones para notificaciones
