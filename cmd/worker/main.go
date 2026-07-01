@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/osmitickets-stack/osmi-server/internal/database"
 )
 
@@ -88,11 +89,7 @@ func executeExpirationJob() {
 
 func expireReservedTickets(
 	ctx context.Context,
-	tx interface {
-		Exec(context.Context, string, ...interface{}) (interface {
-			RowsAffected() int64
-		}, error)
-	},
+	tx pgx.Tx,
 ) (int64, error) {
 	const query = `
 		UPDATE ticketing.tickets
@@ -115,11 +112,7 @@ func expireReservedTickets(
 
 func recalculateTicketTypeCounters(
 	ctx context.Context,
-	tx interface {
-		Exec(context.Context, string, ...interface{}) (interface {
-			RowsAffected() int64
-		}, error)
-	},
+	tx pgx.Tx,
 ) error {
 	const query = `
 		UPDATE ticketing.ticket_types tt

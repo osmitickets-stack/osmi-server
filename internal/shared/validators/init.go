@@ -10,7 +10,7 @@ func RegisterCustomValidators(v *validator.Validate) {
 	v.RegisterValidation("valid_age", ValidateValidAge)
 	v.RegisterValidation("timezone", ValidateTimezone)
 	v.RegisterValidation("iso4217", ValidateISO4217)
-	v.RegisterValidation("alpha", ValidateAlpha)
+	/*v.RegisterValidation("alpha", ValidateAlpha)
 	v.RegisterValidation("alphanum", ValidateAlphaNum)
-	v.RegisterValidation("uuid4", ValidateUUID4)
+	v.RegisterValidation("uuid4", ValidateUUID4)*/
 }

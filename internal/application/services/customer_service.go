@@ -13,21 +13,61 @@ import (
 	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 )
 
-// CreateCustomerRequest - Versión compatible con handler
+// CreateCustomerRequest - DTO interno para creación de clientes
 type CreateCustomerRequest struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-	Phone string `json:"phone"`
+	UserID *int64
+
+	FullName string
+	Email    string
+	Phone    *string
+
+	CompanyName *string
+
+	AddressLine1 *string
+	AddressLine2 *string
+	City         *string
+	State        *string
+	PostalCode   *string
+	Country      *string
+
+	TaxID     *string
+	TaxIDType *string
+	TaxName   *string
+
+	RequiresInvoice bool
+
+	CommunicationPreferences map[string]any
+
+	//CustomerType string
+	//Source       string
 }
 
 // UpdateCustomerRequest - DTO para actualizar cliente
 type UpdateCustomerRequest struct {
-	Name         *string `json:"name,omitempty"`
-	Phone        *string `json:"phone,omitempty"`
-	CompanyName  *string `json:"company_name,omitempty"`
-	IsVIP        *bool   `json:"is_vip,omitempty"`
-	CustomerType *string `json:"customer_type,omitempty"`
-	Address      *string `json:"address,omitempty"`
+	FullName *string
+
+	Phone *string
+
+	CompanyName *string
+
+	AddressLine1 *string
+	AddressLine2 *string
+	City         *string
+	State        *string
+	PostalCode   *string
+	Country      *string
+
+	TaxID     *string
+	TaxIDType *string
+	TaxName   *string
+
+	RequiresInvoice *bool
+
+	CommunicationPreferences map[string]any
+
+	IsVIP *bool
+
+	LastPurchaseAt *time.Time
 }
 
 type CustomerService struct {
@@ -47,35 +87,54 @@ func NewCustomerService(customerRepo repository.CustomerRepository) *CustomerSer
 // CreateCustomer crea un nuevo cliente
 func (s *CustomerService) CreateCustomer(ctx context.Context, req *CreateCustomerRequest) (*entities.Customer, error) {
 	// Validar request
-	if req.Name == "" {
+	if req.FullName == "" {
 		return nil, fmt.Errorf("name is required")
 	}
 	if req.Email == "" {
 		return nil, fmt.Errorf("email is required")
 	}
 
-	// Crear entidad Customer
 	now := time.Now()
-	phonePtr := &req.Phone
-	if req.Phone == "" {
-		phonePtr = nil
-	}
-
 	customer := &entities.Customer{
-		PublicID:        uuid.New().String(),
-		FullName:        req.Name,
-		Email:           req.Email,
-		Phone:           phonePtr,
-		TotalSpent:      0,
-		TotalOrders:     0,
-		TotalTickets:    0,
-		AvgOrderValue:   0,
-		IsActive:        true,
-		IsVIP:           false,
+		PublicID: uuid.New().String(),
+
+		UserID: req.UserID,
+
+		FullName: req.FullName,
+		Email:    req.Email,
+		Phone:    req.Phone,
+
+		CompanyName: req.CompanyName,
+
+		AddressLine1: req.AddressLine1,
+		AddressLine2: req.AddressLine2,
+		City:         req.City,
+		State:        req.State,
+		PostalCode:   req.PostalCode,
+		Country:      req.Country,
+
+		TaxID:     req.TaxID,
+		TaxIDType: req.TaxIDType,
+		TaxName:   req.TaxName,
+
+		RequiresInvoice: req.RequiresInvoice,
+
+		CommunicationPreferences: req.CommunicationPreferences,
+
+		TotalSpent:    0,
+		TotalOrders:   0,
+		TotalTickets:  0,
+		AvgOrderValue: 0,
+
+		IsActive: true,
+		IsVIP:    false,
+
 		CustomerSegment: "new",
-		LifetimeValue:   0,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+
+		LifetimeValue: 0,
+
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	if err := s.customerRepo.Create(ctx, customer); err != nil {
@@ -112,20 +171,68 @@ func (s *CustomerService) UpdateCustomer(ctx context.Context, publicID string, r
 	}
 
 	// Actualizar campos si se proporcionan
-	if req.Name != nil {
-		customer.FullName = *req.Name
+	if req.FullName != nil {
+		customer.FullName = *req.FullName
 	}
+
 	if req.Phone != nil {
 		customer.Phone = req.Phone
 	}
+
 	if req.CompanyName != nil {
 		customer.CompanyName = req.CompanyName
 	}
+
+	if req.AddressLine1 != nil {
+		customer.AddressLine1 = req.AddressLine1
+	}
+
+	if req.AddressLine2 != nil {
+		customer.AddressLine2 = req.AddressLine2
+	}
+
+	if req.City != nil {
+		customer.City = req.City
+	}
+
+	if req.State != nil {
+		customer.State = req.State
+	}
+
+	if req.PostalCode != nil {
+		customer.PostalCode = req.PostalCode
+	}
+
+	if req.Country != nil {
+		customer.Country = req.Country
+	}
+
+	if req.TaxID != nil {
+		customer.TaxID = req.TaxID
+	}
+
+	if req.TaxIDType != nil {
+		customer.TaxIDType = req.TaxIDType
+	}
+
+	if req.TaxName != nil {
+		customer.TaxName = req.TaxName
+	}
+
+	if req.RequiresInvoice != nil {
+		customer.RequiresInvoice = *req.RequiresInvoice
+	}
+
+	if req.CommunicationPreferences != nil {
+		customer.CommunicationPreferences = req.CommunicationPreferences
+	}
+
 	if req.IsVIP != nil {
 		customer.IsVIP = *req.IsVIP
 	}
-	if req.CustomerType != nil {
-		customer.CustomerSegment = *req.CustomerType
+
+	if req.LastPurchaseAt != nil {
+		customer.LastPurchaseAt = req.LastPurchaseAt
 	}
 
 	customer.UpdatedAt = time.Now()

@@ -19,6 +19,13 @@ type CustomerHandler struct {
 	customerService *services.CustomerService
 }
 
+func stringPtr(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
 func NewCustomerHandler(customerService *services.CustomerService) *CustomerHandler {
 	return &CustomerHandler{
 		customerService: customerService,
@@ -40,21 +47,41 @@ func (h *CustomerHandler) CreateCustomer(ctx context.Context, req *osmi.CreateCu
 	}
 
 	// Convertir a request compatible con el servicio
+	var taxIDType *string
+
+	if req.TaxIdType != osmi.TaxIdType_TAX_ID_TYPE_UNSPECIFIED {
+		v := req.TaxIdType.String()
+		taxIDType = &v
+	}
+
 	createReq := &services.CreateCustomerRequest{
-		Name:  req.Name,
-		Email: req.Email,
-		Phone: req.Phone,
+		UserID: nil,
+
+		FullName: req.Name,
+		Email:    req.Email,
+		Phone:    stringPtr(req.Phone),
+
+		CompanyName: stringPtr(req.CompanyName),
+
+		AddressLine1: stringPtr(req.AddressLine1),
+		AddressLine2: stringPtr(req.AddressLine2),
+		City:         stringPtr(req.City),
+		State:        stringPtr(req.State),
+		PostalCode:   stringPtr(req.PostalCode),
+		Country:      stringPtr(req.Country),
+
+		TaxID:     stringPtr(req.TaxId),
+		TaxName:   stringPtr(req.TaxName),
+		TaxIDType: taxIDType,
+
+		RequiresInvoice: req.RequiresInvoice,
+
+		CommunicationPreferences: nil,
 	}
 
 	customer, err := h.customerService.CreateCustomer(ctx, createReq)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
-	// Determinar customer type basado en el request o valor por defecto
-	customerType := req.CustomerType
-	if customerType == "" {
-		customerType = "guest"
 	}
 
 	return &osmi.CustomerResponse{
@@ -63,7 +90,7 @@ func (h *CustomerHandler) CreateCustomer(ctx context.Context, req *osmi.CreateCu
 		Name:         customer.FullName,
 		Email:        customer.Email,
 		Phone:        helpers.SafeStringPtr(customer.Phone),
-		CustomerType: customerType,
+		CustomerType: req.CustomerType,
 		IsVip:        customer.IsVIP,
 		TotalSpent:   customer.TotalSpent,
 		TotalOrders:  int32(customer.TotalOrders),
@@ -89,7 +116,7 @@ func (h *CustomerHandler) GetCustomer(ctx context.Context, req *osmi.GetCustomer
 		Name:         customer.FullName,
 		Email:        customer.Email,
 		Phone:        helpers.SafeStringPtr(customer.Phone),
-		CustomerType: customer.CustomerSegment,
+		CustomerType: osmi.CustomerType_CUSTOMER_TYPE_GUEST,
 		IsVip:        customer.IsVIP,
 		TotalSpent:   customer.TotalSpent,
 		TotalOrders:  int32(customer.TotalOrders),
@@ -107,11 +134,10 @@ func (h *CustomerHandler) UpdateCustomer(ctx context.Context, req *osmi.UpdateCu
 
 	// Convertir protobuf a DTO
 	updateReq := &services.UpdateCustomerRequest{
-		Name:         req.Name,
-		Phone:        req.Phone,
-		CompanyName:  req.CompanyName,
-		IsVIP:        req.IsVip,
-		CustomerType: req.CustomerType,
+		FullName:    req.Name,
+		Phone:       req.Phone,
+		CompanyName: req.CompanyName,
+		IsVIP:       req.IsVip,
 	}
 
 	customer, err := h.customerService.UpdateCustomer(ctx, req.PublicId, updateReq)
@@ -125,7 +151,7 @@ func (h *CustomerHandler) UpdateCustomer(ctx context.Context, req *osmi.UpdateCu
 		Name:         customer.FullName,
 		Email:        customer.Email,
 		Phone:        helpers.SafeStringPtr(customer.Phone),
-		CustomerType: customer.CustomerSegment,
+		CustomerType: osmi.CustomerType_CUSTOMER_TYPE_GUEST,
 		IsVip:        customer.IsVIP,
 		TotalSpent:   customer.TotalSpent,
 		TotalOrders:  int32(customer.TotalOrders),
@@ -140,7 +166,7 @@ func (h *CustomerHandler) ListCustomers(ctx context.Context, req *osmi.ListCusto
 	filter := &customerdto.CustomerFilter{
 		Search:          req.Search,
 		Country:         req.Country,
-		CustomerSegment: req.CustomerSegment,
+		CustomerSegment: req.CustomerSegment.String(),
 		DateFrom:        req.DateFrom,
 		DateTo:          req.DateTo,
 	}
@@ -182,7 +208,7 @@ func (h *CustomerHandler) ListCustomers(ctx context.Context, req *osmi.ListCusto
 			Name:         customer.FullName,
 			Email:        customer.Email,
 			Phone:        helpers.SafeStringPtr(customer.Phone),
-			CustomerType: customer.CustomerSegment,
+			CustomerType: osmi.CustomerType_CUSTOMER_TYPE_GUEST,
 			IsVip:        customer.IsVIP,
 			TotalSpent:   customer.TotalSpent,
 			TotalOrders:  int32(customer.TotalOrders),

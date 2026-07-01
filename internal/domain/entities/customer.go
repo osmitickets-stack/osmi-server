@@ -28,10 +28,10 @@ type Customer struct {
 
 	RequiresInvoice bool `json:"requires_invoice" db:"requires_invoice"`
 
-	// CORREGIDO: Añadido type:jsonb para campos JSONB
+	// Añadido type:jsonb para campos JSONB
 	CommunicationPreferences map[string]interface{} `json:"communication_preferences" db:"communication_preferences,type:jsonb"`
 
-	// CORREGIDO: Los campos numéricos pueden ser float64 o int, pero en la BD son DECIMAL/INTEGER
+	// Los campos numéricos pueden ser float64 o int, pero en la BD son DECIMAL/INTEGER
 	// Usamos tipos que coincidan exactamente con la BD
 	TotalSpent    float64 `json:"total_spent" db:"total_spent"`         // DECIMAL(15,2)
 	TotalOrders   int     `json:"total_orders" db:"total_orders"`       // INTEGER

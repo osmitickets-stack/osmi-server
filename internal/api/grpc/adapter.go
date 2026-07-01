@@ -3,27 +3,27 @@ package grpc
 
 import (
 	"github.com/osmitickets-stack/osmi-protobuf/gen/pb"
-	"github.com/osmitickets-stack/osmi-server/internal/api/dto"
+	"github.com/osmitickets-stack/osmi-server/internal/api/dto/customer"
+	"github.com/osmitickets-stack/osmi-server/internal/api/helpers"
 	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ProtoToCreateCustomerRequest convierte protobuf a DTO
-func ProtoToCreateCustomerRequest(req *pb.CreateCustomerRequest) *dto.CreateCustomerRequest {
-	return &dto.CreateCustomerRequest{
-		FullName:        req.Name,
-		Email:           req.Email,
-		Phone:           req.Phone,
-		CompanyName:     req.CompanyName,
-		AddressLine1:    req.AddressLine1,
-		AddressLine2:    req.AddressLine2,
-		City:            req.City,
-		State:           req.State,
-		PostalCode:      req.PostalCode,
-		Country:         req.Country,
-		TaxID:           req.TaxId,
-		TaxIDType:       req.TaxIdType,
-		TaxName:         req.TaxName,
+func ProtoToCreateCustomerRequest(req *pb.CreateCustomerRequest) *customer.CreateCustomerRequest {
+	return &customer.CreateCustomerRequest{
+		FullName:     req.Name,
+		Email:        req.Email,
+		Phone:        helpers.StringPtr(req.Phone),
+		CompanyName:  helpers.StringPtr(req.CompanyName),
+		AddressLine1: helpers.StringPtr(req.AddressLine1),
+		AddressLine2: helpers.StringPtr(req.AddressLine2),
+		City:         helpers.StringPtr(req.City),
+		State:        helpers.StringPtr(req.State),
+		PostalCode:   helpers.StringPtr(req.PostalCode),
+		Country:      helpers.StringPtr(req.Country),
+		TaxID:        helpers.StringPtr(req.TaxId),
+
 		RequiresInvoice: req.RequiresInvoice,
 	}
 }
@@ -35,17 +35,17 @@ func CustomerToProto(customer *entities.Customer) *pb.CustomerResponse {
 		PublicId:        customer.PublicID,
 		Name:            customer.FullName,
 		Email:           customer.Email,
-		Phone:           SafeStringPtr(customer.Phone),
-		CompanyName:     SafeStringPtr(customer.CompanyName),
-		AddressLine1:    SafeStringPtr(customer.AddressLine1),
-		AddressLine2:    SafeStringPtr(customer.AddressLine2),
-		City:            SafeStringPtr(customer.City),
-		State:           SafeStringPtr(customer.State),
-		PostalCode:      SafeStringPtr(customer.PostalCode),
-		Country:         SafeStringPtr(customer.Country),
-		TaxId:           SafeStringPtr(customer.TaxID),
-		TaxIdType:       SafeStringPtr(customer.TaxIDType),
-		TaxName:         SafeStringPtr(customer.TaxName),
+		Phone:           helpers.SafeStringPtr(customer.Phone),
+		CompanyName:     helpers.SafeStringPtr(customer.CompanyName),
+		AddressLine1:    helpers.SafeStringPtr(customer.AddressLine1),
+		AddressLine2:    helpers.SafeStringPtr(customer.AddressLine2),
+		City:            helpers.SafeStringPtr(customer.City),
+		State:           helpers.SafeStringPtr(customer.State),
+		PostalCode:      helpers.SafeStringPtr(customer.PostalCode),
+		Country:         helpers.SafeStringPtr(customer.Country),
+		TaxId:           helpers.SafeStringPtr(customer.TaxID),
+		TaxName:         helpers.SafeStringPtr(customer.TaxName),
+		TaxIdType:       pb.TaxIdType_TAX_ID_TYPE_UNSPECIFIED,
 		RequiresInvoice: customer.RequiresInvoice,
 		TotalSpent:      customer.TotalSpent,
 		TotalOrders:     int32(customer.TotalOrders),
@@ -53,7 +53,7 @@ func CustomerToProto(customer *entities.Customer) *pb.CustomerResponse {
 		AvgOrderValue:   customer.AvgOrderValue,
 		IsActive:        customer.IsActive,
 		IsVip:           customer.IsVIP,
-		CustomerSegment: customer.CustomerSegment,
+		CustomerSegment: pb.CustomerSegment_CUSTOMER_SEGMENT_UNSPECIFIED,
 		LifetimeValue:   customer.LifetimeValue,
 		CreatedAt:       timestamppb.New(customer.CreatedAt),
 		UpdatedAt:       timestamppb.New(customer.UpdatedAt),

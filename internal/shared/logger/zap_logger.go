@@ -14,6 +14,10 @@ type ZapLogger struct {
 	zapLogger *zap.Logger
 }
 
+func InitLogger() {
+	InitGlobalLogger("production")
+}
+
 // NewZapLogger crea un nuevo logger zap
 func NewZapLogger(environment string) *ZapLogger {
 	var config zap.Config

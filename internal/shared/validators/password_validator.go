@@ -14,10 +14,10 @@ func ValidateStrongPassword(fl validator.FieldLevel) bool {
 	}
 
 	var (
-		hasUpper   = false
-		hasLower   = false
-		hasNumber  = false
-		hasSpecial = false
+		hasUpper  = false
+		hasLower  = false
+		hasNumber = false
+		//hasSpecial = false
 	)
 
 	for _, char := range password {
@@ -28,8 +28,8 @@ func ValidateStrongPassword(fl validator.FieldLevel) bool {
 			hasLower = true
 		case unicode.IsDigit(char):
 			hasNumber = true
-		case unicode.IsPunct(char) || unicode.IsSymbol(char):
-			hasSpecial = true
+			/*case unicode.IsPunct(char) || unicode.IsSymbol(char):
+			hasSpecial = true*/
 		}
 	}
 

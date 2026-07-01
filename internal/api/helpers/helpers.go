@@ -39,3 +39,12 @@ func SafeStringID(id *int64) string {
 	}
 	return strconv.FormatInt(*id, 10)
 }
+
+// StringPtr convierte un string a *string.
+// Devuelve nil cuando el string está vacío.
+func StringPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
