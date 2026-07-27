@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -577,6 +578,11 @@ func (r *EventRepository) List(ctx context.Context, filter map[string]interface{
 
 	// Contar total
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM ticketing.events WHERE %s", whereClause)
+
+	// 🔴 AGREGAR LOG PARA VER LA CONSULTA
+	log.Printf("📊 countQuery: %s", countQuery)
+	log.Printf("📊 args: %+v", args)
+
 	var total int64
 	err := r.db.QueryRow(ctx, countQuery, args).Scan(&total)
 	if err != nil {
@@ -606,6 +612,10 @@ func (r *EventRepository) List(ctx context.Context, filter map[string]interface{
 
 	args["limit"] = limit
 	args["offset"] = offset
+
+	// 🔴 AGREGAR LOG PARA VER LA CONSULTA COMPLETA
+	log.Printf("📊 query: %s", query)
+	log.Printf("📊 args con limit/offset: %+v", args)
 
 	rows, err := r.db.Query(ctx, query, args)
 	if err != nil {
