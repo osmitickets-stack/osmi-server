@@ -158,60 +158,72 @@ func (h *EventHandler) ListEvents(ctx context.Context, req *osmi.ListEventsReque
 	// Si está vacío, se envía nil para que PostgreSQL lo ignore
 	// ========================================================================
 
-	// Para eventStatus (renombrado para no chocar con el paquete status)
+	// Para eventStatus
 	var eventStatus *string
 	if req.Status != "" {
 		eventStatus = &req.Status
 	}
 
-	// Para DateFrom (opcional)
+	// Para DateFrom
 	var dateFrom *string
 	if req.DateFrom != "" {
 		dateFrom = &req.DateFrom
 	}
 
-	// Para DateTo (opcional)
+	// Para DateTo
 	var dateTo *string
 	if req.DateTo != "" {
 		dateTo = &req.DateTo
 	}
 
-	// Para City (opcional)
+	// Para City
 	var city *string
 	if req.City != "" {
 		city = &req.City
 	}
 
-	// Para Country (opcional)
+	// Para Country
 	var country *string
 	if req.Country != "" {
 		country = &req.Country
 	}
 
-	// Para OrganizerID (opcional)
+	// Para OrganizerID
 	var organizerID *string
 	if req.OrganizerId != "" {
 		organizerID = &req.OrganizerId
 	}
 
-	// Para CategoryID (opcional)
+	// Para CategoryID
 	var categoryID *string
 	if req.CategoryId != "" {
 		categoryID = &req.CategoryId
 	}
 
+	// Para IsFeatured (solo si es true)
+	var isFeatured *bool
+	if req.IsFeatured {
+		isFeatured = &req.IsFeatured
+	}
+
+	// Para IsFree (solo si es true)
+	var isFree *bool
+	if req.IsFree {
+		isFree = &req.IsFree
+	}
+
 	// Construir filtro SOLO con valores no vacíos
 	filter := eventdto.EventFilter{
 		Search:      req.Name,
-		Status:      eventStatus, // ✅ nil si viene vacío, renombrado para evitar conflicto
-		DateFrom:    dateFrom,    // ✅ nil si viene vacío
-		DateTo:      dateTo,      // ✅ nil si viene vacío
-		City:        city,        // ✅ nil si viene vacío
-		Country:     country,     // ✅ nil si viene vacío
-		OrganizerID: organizerID, // ✅ nil si viene vacío
-		CategoryID:  categoryID,  // ✅ nil si viene vacío
-		IsFeatured:  &req.IsFeatured,
-		IsFree:      &req.IsFree,
+		Status:      eventStatus,
+		DateFrom:    dateFrom,
+		DateTo:      dateTo,
+		City:        city,
+		Country:     country,
+		OrganizerID: organizerID,
+		CategoryID:  categoryID,
+		IsFeatured:  isFeatured, // ✅ nil si es false
+		IsFree:      isFree,     // ✅ nil si es false
 	}
 
 	// Paginación
