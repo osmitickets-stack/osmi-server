@@ -311,9 +311,6 @@ osmi-server/
         ├── service.yaml
         ├── configmap.yaml
         └── ingress.yaml
-├── scripts/                               # Scripts de automatización y utilidad
-│   ├── migrate.sh                         # Script para ejecutar migraciones de base de datos
-│   └── seed.sh                            # Script para poblar base de datos con datos iniciales
 ├── tests/                                 # Pruebas automatizadas
 │   ├── e2e/                               # Pruebas end-to-end
 │   │   ├── checkin_flow_test.go           # Prueba completa del flujo de check-in

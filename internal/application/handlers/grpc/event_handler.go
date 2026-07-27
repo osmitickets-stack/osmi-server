@@ -158,19 +158,34 @@ func (h *EventHandler) ListEvents(ctx context.Context, req *osmi.ListEventsReque
 	// Si está vacío, se envía nil para que PostgreSQL lo ignore
 	// ========================================================================
 
-	// Para eventStatus (renombrado para no chocar con el paquete status)
-	var eventStatus *string
+	// Para eventStatus (renombrado para no chocar con el paquete status) borrar si ya funciona
+	/*	var eventStatus *string
+		if req.Status != "" {
+			eventStatus = &req.Status
+		}
+
+		// Para DateFrom (opcional)
+		var dateFrom *string
+		if req.DateFrom != "" {
+			dateFrom = &req.DateFrom
+		}
+
+		// Para DateTo (opcional)
+		var dateTo *string
+		if req.DateTo != "" {
+			dateTo = &req.DateTo
+		}*/
+
+	var status *string
 	if req.Status != "" {
-		eventStatus = &req.Status
+		status = &req.Status
 	}
 
-	// Para DateFrom (opcional)
 	var dateFrom *string
 	if req.DateFrom != "" {
 		dateFrom = &req.DateFrom
 	}
 
-	// Para DateTo (opcional)
 	var dateTo *string
 	if req.DateTo != "" {
 		dateTo = &req.DateTo
@@ -203,7 +218,7 @@ func (h *EventHandler) ListEvents(ctx context.Context, req *osmi.ListEventsReque
 	// Construir filtro SOLO con valores no vacíos
 	filter := eventdto.EventFilter{
 		Search:      req.Name,
-		Status:      eventStatus, // ✅ nil si viene vacío, renombrado para evitar conflicto
+		Status:      status,      // ✅ nil si viene vacío, renombrado para evitar conflicto
 		DateFrom:    dateFrom,    // ✅ nil si viene vacío
 		DateTo:      dateTo,      // ✅ nil si viene vacío
 		City:        city,        // ✅ nil si viene vacío
