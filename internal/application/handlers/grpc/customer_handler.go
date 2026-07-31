@@ -151,31 +151,34 @@ func (h *CustomerHandler) UpdateCustomer(ctx context.Context, req *osmi.UpdateCu
 // ListCustomers lista clientes con filtros y paginación
 func (h *CustomerHandler) ListCustomers(ctx context.Context, req *osmi.ListCustomersRequest) (*osmi.CustomerListResponse, error) {
 	// ============================================================
-	// CRÍTICO: Usar req.Filter (NO req.Email, req.Country, etc.)
+	// CRÍTICO: req.Filter puede ser nil
 	// ============================================================
 
-	// Convertir filtros DESDE req.Filter
-	filter := &customerdto.CustomerFilter{
-		Search:          req.Filter.Search,
-		Email:           req.Filter.Email,
-		Phone:           req.Filter.Phone,
-		TaxID:           req.Filter.TaxId,
-		PublicID:        req.Filter.PublicId,
-		CompanyName:     req.Filter.CompanyName,
-		Country:         req.Filter.Country,
-		CustomerSegment: req.Filter.CustomerSegment,
-		DateFrom:        req.Filter.DateFrom,
-		DateTo:          req.Filter.DateTo,
-	}
+	// Crear un filtro vacío por defecto
+	filter := &customerdto.CustomerFilter{}
 
-	// Usar BoolValue para IsActive
-	if req.Filter.IsActive != nil {
-		filter.IsActive = &req.Filter.IsActive.Value
-	}
+	// Si req.Filter no es nil, usarlo
+	if req.Filter != nil {
+		filter.Search = req.Filter.Search
+		filter.Email = req.Filter.Email
+		filter.Phone = req.Filter.Phone
+		filter.TaxID = req.Filter.TaxId
+		filter.PublicID = req.Filter.PublicId
+		filter.CompanyName = req.Filter.CompanyName
+		filter.Country = req.Filter.Country
+		filter.CustomerSegment = req.Filter.CustomerSegment
+		filter.DateFrom = req.Filter.DateFrom
+		filter.DateTo = req.Filter.DateTo
 
-	// Usar BoolValue para IsVIP
-	if req.Filter.IsVip != nil {
-		filter.IsVIP = &req.Filter.IsVip.Value
+		// Usar BoolValue para IsActive
+		if req.Filter.IsActive != nil {
+			filter.IsActive = &req.Filter.IsActive.Value
+		}
+
+		// Usar BoolValue para IsVIP
+		if req.Filter.IsVip != nil {
+			filter.IsVIP = &req.Filter.IsVip.Value
+		}
 	}
 
 	// Paginación
