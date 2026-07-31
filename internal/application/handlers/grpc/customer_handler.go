@@ -38,7 +38,6 @@ func NewCustomerHandler(customerService *services.CustomerService) *CustomerHand
 
 // CreateCustomer maneja la creación de un nuevo cliente
 func (h *CustomerHandler) CreateCustomer(ctx context.Context, req *osmi.CreateCustomerRequest) (*osmi.CustomerResponse, error) {
-	// Validación básica
 	if req.Name == "" {
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
@@ -46,37 +45,28 @@ func (h *CustomerHandler) CreateCustomer(ctx context.Context, req *osmi.CreateCu
 		return nil, status.Error(codes.InvalidArgument, "email is required")
 	}
 
-	// Convertir a request compatible con el servicio
 	var taxIDType *string
-
 	if req.TaxIdType != osmi.TaxIdType_TAX_ID_TYPE_UNSPECIFIED {
 		v := req.TaxIdType.String()
 		taxIDType = &v
 	}
 
 	createReq := &services.CreateCustomerRequest{
-		UserID: nil,
-
-		FullName: req.Name,
-		Email:    req.Email,
-		Phone:    stringPtr(req.Phone),
-
-		CompanyName: stringPtr(req.CompanyName),
-
-		AddressLine1: stringPtr(req.AddressLine1),
-		AddressLine2: stringPtr(req.AddressLine2),
-		City:         stringPtr(req.City),
-		State:        stringPtr(req.State),
-		PostalCode:   stringPtr(req.PostalCode),
-		Country:      stringPtr(req.Country),
-
-		TaxID:     stringPtr(req.TaxId),
-		TaxName:   stringPtr(req.TaxName),
-		TaxIDType: taxIDType,
-
+		UserID:          nil,
+		FullName:        req.Name,
+		Email:           req.Email,
+		Phone:           stringPtr(req.Phone),
+		CompanyName:     stringPtr(req.CompanyName),
+		AddressLine1:    stringPtr(req.AddressLine1),
+		AddressLine2:    stringPtr(req.AddressLine2),
+		City:            stringPtr(req.City),
+		State:           stringPtr(req.State),
+		PostalCode:      stringPtr(req.PostalCode),
+		Country:         stringPtr(req.Country),
+		TaxID:           stringPtr(req.TaxId),
+		TaxName:         stringPtr(req.TaxName),
+		TaxIDType:       taxIDType,
 		RequiresInvoice: req.RequiresInvoice,
-
-		CommunicationPreferences: nil,
 	}
 
 	customer, err := h.customerService.CreateCustomer(ctx, createReq)
@@ -127,12 +117,10 @@ func (h *CustomerHandler) GetCustomer(ctx context.Context, req *osmi.GetCustomer
 
 // UpdateCustomer actualiza la información de un cliente
 func (h *CustomerHandler) UpdateCustomer(ctx context.Context, req *osmi.UpdateCustomerRequest) (*osmi.CustomerResponse, error) {
-	// Validar que se proporcione el ID
 	if req.PublicId == "" {
 		return nil, status.Error(codes.InvalidArgument, "customer public_id is required")
 	}
 
-	// Convertir protobuf a DTO
 	updateReq := &services.UpdateCustomerRequest{
 		FullName:    req.Name,
 		Phone:       req.Phone,
@@ -162,23 +150,32 @@ func (h *CustomerHandler) UpdateCustomer(ctx context.Context, req *osmi.UpdateCu
 
 // ListCustomers lista clientes con filtros y paginación
 func (h *CustomerHandler) ListCustomers(ctx context.Context, req *osmi.ListCustomersRequest) (*osmi.CustomerListResponse, error) {
-	// Convertir filtros
+	// ============================================================
+	// CRÍTICO: Usar req.Filter (NO req.Email, req.Country, etc.)
+	// ============================================================
+
+	// Convertir filtros DESDE req.Filter
 	filter := &customerdto.CustomerFilter{
-		Search:          req.Search,
-		Country:         req.Country,
-		CustomerSegment: req.CustomerSegment.String(),
-		DateFrom:        req.DateFrom,
-		DateTo:          req.DateTo,
+		Search:          req.Filter.Search,
+		Email:           req.Filter.Email,
+		Phone:           req.Filter.Phone,
+		TaxID:           req.Filter.TaxId,
+		PublicID:        req.Filter.PublicId,
+		CompanyName:     req.Filter.CompanyName,
+		Country:         req.Filter.Country,
+		CustomerSegment: req.Filter.CustomerSegment,
+		DateFrom:        req.Filter.DateFrom,
+		DateTo:          req.Filter.DateTo,
 	}
 
-	// Solo agregar IsActive si se envió explícitamente (true)
-	if req.IsActive {
-		filter.IsActive = &req.IsActive
+	// Usar BoolValue para IsActive
+	if req.Filter.IsActive != nil {
+		filter.IsActive = &req.Filter.IsActive.Value
 	}
 
-	// Solo agregar IsVIP si se envió explícitamente (true)
-	if req.IsVip {
-		filter.IsVIP = &req.IsVip
+	// Usar BoolValue para IsVIP
+	if req.Filter.IsVip != nil {
+		filter.IsVIP = &req.Filter.IsVip.Value
 	}
 
 	// Paginación
@@ -234,13 +231,11 @@ func (h *CustomerHandler) ListCustomers(ctx context.Context, req *osmi.ListCusto
 
 // GetCustomerStats obtiene estadísticas de clientes
 func (h *CustomerHandler) GetCustomerStats(ctx context.Context, req *osmi.Empty) (*osmi.CustomerStatsResponse, error) {
-	// Llamar al servicio
 	stats, err := h.customerService.GetCustomerStats(ctx)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	// Convertir a respuesta
 	topCountries := make([]*osmi.CountryStats, len(stats.TopCountries))
 	for i, country := range stats.TopCountries {
 		topCountries[i] = &osmi.CountryStats{

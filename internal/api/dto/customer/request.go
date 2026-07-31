@@ -1,3 +1,5 @@
+// internal/api/dto/customer/request.go
+
 package customer
 
 import "time"
