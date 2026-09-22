@@ -47,5 +47,7 @@ type PaymentRepository interface {
 	GetTotalProcessedAmount(ctx context.Context, currency string) (float64, error)
 
 	// Stripe Events
-	SaveStripeEvent(ctx context.Context, eventID, eventType string, payload []byte) error
+	SaveStripeEvent(ctx context.Context, eventID, eventType string, payload []byte) (bool, error)
+	IsStripeEventProcessed(ctx context.Context, eventID string) (bool, error)
+	MarkStripeEventProcessed(ctx context.Context, eventID string) error
 }

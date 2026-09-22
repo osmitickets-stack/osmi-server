@@ -103,16 +103,8 @@ func (h *Handler) GetCustomerTickets(ctx context.Context, req *osmi.GetCustomerT
 }
 
 // ============ TICKETS ============
-func (h *Handler) CreateTicket(ctx context.Context, req *osmi.CreateTicketRequest) (*osmi.TicketResponse, error) {
-	return h.ticketHandler.CreateTicket(ctx, req)
-}
-
 func (h *Handler) ReserveTicket(ctx context.Context, req *osmi.ReserveTicketRequest) (*osmi.TicketResponse, error) {
 	return h.ticketHandler.ReserveTicket(ctx, req)
-}
-
-func (h *Handler) PurchaseTicket(ctx context.Context, req *osmi.PurchaseTicketRequest) (*osmi.TicketResponse, error) {
-	return h.ticketHandler.PurchaseTicket(ctx, req)
 }
 
 func (h *Handler) CheckInTicket(ctx context.Context, req *osmi.CheckInTicketRequest) (*osmi.TicketResponse, error) {
@@ -219,13 +211,16 @@ func (h *Handler) CreatePayment(ctx context.Context, req *osmi.CreatePaymentRequ
 	return h.paymentHandler.CreatePayment(ctx, req)
 }
 
-func (h *Handler) ProcessOrder(ctx context.Context, req *osmi.ProcessOrderRequest) (*osmi.Empty, error) {
-	return h.paymentHandler.ProcessOrder(ctx, req)
-}
-
 // CreatePaymentIntent crea un PaymentIntent de Stripe
 func (h *Handler) CreatePaymentIntent(ctx context.Context, req *osmi.CreatePaymentIntentRequest) (*osmi.PaymentIntentResponse, error) {
 	return h.paymentHandler.CreatePaymentIntent(ctx, req)
+}
+
+func (h *Handler) GetOrderConfirmation(
+	ctx context.Context,
+	req *osmi.GetOrderConfirmationRequest,
+) (*osmi.OrderConfirmationResponse, error) {
+	return h.paymentHandler.GetOrderConfirmation(ctx, req)
 }
 
 func (h *Handler) HandleWebhook(ctx context.Context, req *osmi.WebhookRequest) (*osmi.Empty, error) {

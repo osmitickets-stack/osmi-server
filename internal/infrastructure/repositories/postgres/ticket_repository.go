@@ -1049,13 +1049,188 @@ func (r *TicketRepository) GetByPublicIDForUpdate(ctx context.Context, tx pgx.Tx
 	return &ticket, nil
 }
 
-// SaveStripeEvent guarda un evento de Stripe para auditoría
-func (r *PaymentRepository) SaveStripeEvent(ctx context.Context, eventID, eventType string, payload []byte) error {
+// FindByOrderIDForUpdate obtiene y bloquea todos los tickets de una orden.
+// El ORDER BY id garantiza un orden determinista de adquisición de locks.
+func (r *TicketRepository) FindByOrderIDForUpdate(
+	ctx context.Context,
+	tx pgx.Tx,
+	orderID int64,
+) ([]*entities.Ticket, error) {
 	query := `
-		INSERT INTO audit.stripe_events (event_id, event_type, payload, processed_at, created_at)
-		VALUES ($1, $2, $3, NOW(), NOW())
+		SELECT
+			id, public_uuid, ticket_type_id, event_id, customer_id, order_id,
+			code, secret_hash, qr_code_data, status, final_price, currency, tax_amount,
+			attendee_name, attendee_email, attendee_phone,
+			checked_in_at, checked_in_by, checkin_method, checkin_location,
+			reserved_at, reserved_by, reservation_expires_at,
+			transfer_token, transferred_from, transferred_at,
+			validation_count, last_validated_at,
+			sold_at, cancelled_at, refunded_at,
+			created_at, updated_at
+		FROM ticketing.tickets
+		WHERE order_id = $1
+		ORDER BY id
+		FOR UPDATE
+	`
+
+	rows, err := tx.Query(ctx, query, orderID)
+	if err != nil {
+		return nil, r.handleError(err, "failed to get order tickets for update")
+	}
+	defer rows.Close()
+
+	tickets := make([]*entities.Ticket, 0)
+
+	for rows.Next() {
+		var ticket entities.Ticket
+
+		var attendeeName, attendeeEmail, attendeePhone, qrCodeData *string
+		var checkedInBy, reservedBy *int64
+		var checkinMethod, checkinLocation *string
+		var checkedInAt, reservedAt, reservationExpiresAt *time.Time
+		var soldAt, cancelledAt, refundedAt, lastValidatedAt *time.Time
+		var transferredFrom *int64
+		var transferToken *string
+
+		err := rows.Scan(
+			&ticket.ID,
+			&ticket.PublicID,
+			&ticket.TicketTypeID,
+			&ticket.EventID,
+			&ticket.CustomerID,
+			&ticket.OrderID,
+			&ticket.Code,
+			&ticket.SecretHash,
+			&qrCodeData,
+			&ticket.Status,
+			&ticket.FinalPrice,
+			&ticket.Currency,
+			&ticket.TaxAmount,
+			&attendeeName,
+			&attendeeEmail,
+			&attendeePhone,
+			&checkedInAt,
+			&checkedInBy,
+			&checkinMethod,
+			&checkinLocation,
+			&reservedAt,
+			&reservedBy,
+			&reservationExpiresAt,
+			&transferToken,
+			&transferredFrom,
+			&ticket.TransferredAt,
+			&ticket.ValidationCount,
+			&lastValidatedAt,
+			&soldAt,
+			&cancelledAt,
+			&refundedAt,
+			&ticket.CreatedAt,
+			&ticket.UpdatedAt,
+		)
+		if err != nil {
+			return nil, r.handleError(err, "failed to scan order ticket for update")
+		}
+
+		ticket.AttendeeName = attendeeName
+		ticket.AttendeeEmail = attendeeEmail
+		ticket.AttendeePhone = attendeePhone
+		ticket.QRCodeData = qrCodeData
+		ticket.CheckedInAt = checkedInAt
+		ticket.CheckedInBy = checkedInBy
+		ticket.CheckinMethod = checkinMethod
+		ticket.CheckinLocation = checkinLocation
+		ticket.ReservedAt = reservedAt
+		ticket.ReservedBy = reservedBy
+		ticket.ReservationExpiresAt = reservationExpiresAt
+		ticket.TransferToken = transferToken
+		ticket.TransferredFrom = transferredFrom
+		ticket.LastValidatedAt = lastValidatedAt
+		ticket.SoldAt = soldAt
+		ticket.CancelledAt = cancelledAt
+		ticket.RefundedAt = refundedAt
+
+		tickets = append(tickets, &ticket)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, r.handleError(err, "failed while reading order tickets for update")
+	}
+
+	return tickets, nil
+}
+
+// SaveStripeEvent registra un evento Stripe sin marcarlo todavía como procesado.
+// Retorna true si el evento fue insertado y false si ya existía.
+func (r *PaymentRepository) SaveStripeEvent(
+	ctx context.Context,
+	eventID string,
+	eventType string,
+	payload []byte,
+) (bool, error) {
+	query := `
+		INSERT INTO audit.stripe_events (
+			event_id,
+			event_type,
+			payload,
+			processed_at,
+			created_at
+		)
+		VALUES ($1, $2, $3, NULL, NOW())
 		ON CONFLICT (event_id) DO NOTHING
 	`
-	_, err := r.db.Exec(ctx, query, eventID, eventType, payload)
-	return err
+
+	result, err := r.db.Exec(ctx, query, eventID, eventType, payload)
+	if err != nil {
+		return false, err
+	}
+
+	return result.RowsAffected() > 0, nil
+}
+
+// IsStripeEventProcessed indica si un evento Stripe ya terminó
+// satisfactoriamente su procesamiento.
+func (r *PaymentRepository) IsStripeEventProcessed(
+	ctx context.Context,
+	eventID string,
+) (bool, error) {
+	query := `
+		SELECT processed_at IS NOT NULL
+		FROM audit.stripe_events
+		WHERE event_id = $1
+	`
+
+	var processed bool
+
+	err := r.db.QueryRow(ctx, query, eventID).Scan(&processed)
+	if err != nil {
+		return false, err
+	}
+
+	return processed, nil
+}
+
+// MarkStripeEventProcessed marca el evento como procesado solamente
+func (r *PaymentRepository) MarkStripeEventProcessed(
+	ctx context.Context,
+	eventID string,
+) error {
+	query := `
+		UPDATE audit.stripe_events
+		SET processed_at = COALESCE(processed_at, NOW())
+		WHERE event_id = $1
+	`
+
+	result, err := r.db.Exec(ctx, query, eventID)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf(
+			"stripe event %s does not exist",
+			eventID,
+		)
+	}
+
+	return nil
 }

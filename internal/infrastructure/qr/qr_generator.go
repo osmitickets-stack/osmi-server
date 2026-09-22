@@ -1,3 +1,5 @@
+//internal/infrastructure/qr/qr_generator.go
+
 package qr
 
 import (

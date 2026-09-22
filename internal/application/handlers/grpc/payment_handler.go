@@ -100,20 +100,6 @@ func (h *PaymentHandler) CreatePayment(ctx context.Context, req *osmi.CreatePaym
 	}, nil
 }
 
-// ProcessOrder procesa una orden pagada
-func (h *PaymentHandler) ProcessOrder(ctx context.Context, req *osmi.ProcessOrderRequest) (*osmi.Empty, error) {
-	if req.OrderId == "" {
-		return nil, status.Error(codes.InvalidArgument, "order_id is required")
-	}
-
-	err := h.paymentService.ProcessPaidOrder(ctx, req.OrderId)
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-
-	return &osmi.Empty{}, nil
-}
-
 // CreatePaymentIntent crea un PaymentIntent de Stripe CON reserva temporal de stock
 func (h *PaymentHandler) CreatePaymentIntent(
 	ctx context.Context,
@@ -152,5 +138,50 @@ func (h *PaymentHandler) CreatePaymentIntent(
 		PaymentIntentId: resp.PaymentIntentID,
 		Amount:          resp.Amount,
 		Currency:        resp.Currency,
+	}, nil
+}
+
+func (h *PaymentHandler) GetOrderConfirmation(
+	ctx context.Context,
+	req *osmi.GetOrderConfirmationRequest,
+) (*osmi.OrderConfirmationResponse, error) {
+	if req.OrderId == "" {
+		return nil, status.Error(codes.InvalidArgument, "order_id is required")
+	}
+	if req.PaymentIntentId == "" {
+		return nil, status.Error(codes.InvalidArgument, "payment_intent_id is required")
+	}
+
+	confirmation, err := h.paymentService.GetOrderConfirmation(
+		ctx,
+		req.OrderId,
+		req.PaymentIntentId,
+	)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	items := make([]*osmi.OrderConfirmationItem, 0, len(confirmation.Items))
+
+	for _, item := range confirmation.Items {
+		items = append(items, &osmi.OrderConfirmationItem{
+			TicketTypeId:   item.TicketTypeID,
+			TicketTypeName: item.TicketTypeName,
+			Quantity:       int32(item.Quantity),
+			UnitPrice:      item.UnitPrice,
+			TotalPrice:     item.TotalPrice,
+			EventName:      item.EventName,
+		})
+	}
+
+	return &osmi.OrderConfirmationResponse{
+		OrderId:       confirmation.OrderID,
+		OrderStatus:   confirmation.OrderStatus,
+		PaymentStatus: confirmation.PaymentStatus,
+		CustomerEmail: confirmation.CustomerEmail,
+		CustomerName:  confirmation.CustomerName,
+		TotalAmount:   confirmation.TotalAmount,
+		Currency:      confirmation.Currency,
+		Items:         items,
 	}, nil
 }

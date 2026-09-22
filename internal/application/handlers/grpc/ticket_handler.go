@@ -31,39 +31,6 @@ func NewTicketHandler(ticketService *services.TicketService) *TicketHandler {
 	}
 }
 
-// CreateTicket maneja la creación de tickets (venta directa)
-func (h *TicketHandler) CreateTicket(ctx context.Context, req *osmi.CreateTicketRequest) (*osmi.TicketResponse, error) {
-	if req.EventId == "" {
-		return nil, status.Error(codes.InvalidArgument, "event_id is required")
-	}
-	if req.CustomerId == "" {
-		return nil, status.Error(codes.InvalidArgument, "customer_id is required")
-	}
-	if req.TicketTypeId == "" {
-		return nil, status.Error(codes.InvalidArgument, "ticket_type_id is required")
-	}
-	if req.Quantity <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "quantity must be greater than 0")
-	}
-
-	createReq := &ticketdto.CreateTicketRequest{
-		EventID:      req.EventId,
-		CustomerID:   req.CustomerId,
-		TicketTypeID: req.TicketTypeId,
-		Quantity:     req.Quantity,
-		UserID:       req.UserId,
-	}
-
-	log.Printf("📦 Creando ticket con CustomerID: %q", createReq.CustomerID)
-
-	ticket, err := h.ticketService.CreateTicket(ctx, createReq)
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
-	return h.ticketToProto(ticket), nil
-}
-
 // ReserveTicket maneja la reserva de tickets
 func (h *TicketHandler) ReserveTicket(ctx context.Context, req *osmi.ReserveTicketRequest) (*osmi.TicketResponse, error) {
 	// 🔥 ELIMINADO: validación de user_id (temporalmente)
@@ -83,29 +50,6 @@ func (h *TicketHandler) ReserveTicket(ctx context.Context, req *osmi.ReserveTick
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	return h.ticketToProto(ticket), nil
-}
-
-// PurchaseTicket maneja la compra de un ticket reservado
-func (h *TicketHandler) PurchaseTicket(ctx context.Context, req *osmi.PurchaseTicketRequest) (*osmi.TicketResponse, error) {
-	if req.TicketId == "" {
-		return nil, status.Error(codes.InvalidArgument, "ticket_id is required")
-	}
-	if req.CustomerId == "" {
-		return nil, status.Error(codes.InvalidArgument, "customer_id is required")
-	}
-
-	purchaseReq := &ticketdto.PurchaseTicketRequest{
-		TicketID:   req.TicketId,
-		CustomerID: req.CustomerId,
-	}
-
-	ticket, err := h.ticketService.PurchaseTicket(ctx, purchaseReq)
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
-	// 🔥 CAMBIADO: usar ticketToProto en lugar de respuesta manual
 	return h.ticketToProto(ticket), nil
 }
 

@@ -471,29 +471,6 @@ func (s *Server) GetUser(ctx context.Context, req *osmi.GetUserRequest) (*osmi.U
 // ============================================================================
 // MÉTODOS DE TICKETS
 // ============================================================================
-
-// CreateTicket implementa el método gRPC para crear tickets
-func (s *Server) CreateTicket(ctx context.Context, req *osmi.CreateTicketRequest) (*osmi.TicketResponse, error) {
-	log.Printf("CreateTicket called with event_id: %s, user_id: %s, ticket_type_id: %s, quantity: %d",
-		truncateString(req.EventId, 50), truncateString(req.UserId, 50),
-		truncateString(req.TicketTypeId, 50), req.Quantity)
-
-	if strings.TrimSpace(req.EventId) == "" {
-		return nil, fmt.Errorf("event_id is required")
-	}
-	if strings.TrimSpace(req.TicketTypeId) == "" {
-		return nil, fmt.Errorf("ticket_type_id is required")
-	}
-	if req.Quantity <= 0 {
-		req.Quantity = 1
-	}
-	if req.Quantity > 10 {
-		return nil, fmt.Errorf("cannot create more than 10 tickets at once")
-	}
-
-	return nil, fmt.Errorf("CreateTicket method is under development")
-}
-
 // ListTickets implementa el método gRPC para listar tickets
 func (s *Server) ListTickets(ctx context.Context, req *osmi.ListTicketsRequest) (*osmi.TicketListResponse, error) {
 	log.Printf("ListTickets called with filters")

@@ -2,8 +2,8 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,6 +48,7 @@ func (s *OrderService) CreateOrder(ctx context.Context, req *orderdto.CreateOrde
 
 	var totalAmount float64
 	var tickets []*entities.Ticket
+	var orderItems []*entities.OrderItem
 
 	for _, item := range req.Items {
 		ticketType, err := s.ticketTypeRepo.FindByPublicID(ctx, item.TicketTypeID)
@@ -55,18 +56,33 @@ func (s *OrderService) CreateOrder(ctx context.Context, req *orderdto.CreateOrde
 			return nil, nil, fmt.Errorf("ticket type not found: %w", err)
 		}
 
-		available, err := s.ticketTypeRepo.CheckAvailability(ctx, ticketType.ID, item.Quantity)
-		if err != nil || !available {
-			return nil, nil, errors.New("not enough tickets available")
+		err = s.ticketTypeRepo.ReserveTicketWithLock(ctx, tx, ticketType.ID, item.Quantity)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to reserve tickets: %w", err)
 		}
+
+		unitPrice := ticketType.BasePrice
+		itemTotal := unitPrice * float64(item.Quantity)
+
+		orderItems = append(orderItems, &entities.OrderItem{
+			TicketTypeID: ticketType.ID,
+			Quantity:     item.Quantity,
+			UnitPrice:    unitPrice,
+			TotalPrice:   itemTotal,
+		})
 
 		for i := 0; i < item.Quantity; i++ {
 			ticket := &entities.Ticket{
-				PublicID:             uuid.New().String(),
-				TicketTypeID:         ticketType.ID,
-				EventID:              ticketType.EventID,
-				CustomerID:           &customer.ID,
-				Code:                 fmt.Sprintf("ORD-%d-%d-%s", ticketType.EventID, ticketType.ID, uuid.New().String()[:8]),
+				PublicID:     uuid.New().String(),
+				TicketTypeID: ticketType.ID,
+				EventID:      ticketType.EventID,
+				CustomerID:   &customer.ID,
+				Code: fmt.Sprintf(
+					"ORD-%d-%d-%s",
+					ticketType.EventID,
+					ticketType.ID,
+					uuid.New().String()[:8],
+				),
 				SecretHash:           uuid.New().String(),
 				Status:               "reserved",
 				FinalPrice:           ticketType.BasePrice,
@@ -85,19 +101,20 @@ func (s *OrderService) CreateOrder(ctx context.Context, req *orderdto.CreateOrde
 
 			tickets = append(tickets, ticket)
 			totalAmount += ticket.FinalPrice
-
-			err = s.ticketTypeRepo.ReserveTicketsTx(ctx, tx, ticketType.ID, 1)
-			if err != nil {
-				return nil, nil, err
-			}
 		}
 	}
 
 	paymentMethodStr := ""
+
+	customerName := strings.TrimSpace(req.CustomerName)
+	if customerName == "" {
+		customerName = customer.FullName
+	}
+
 	order := &entities.Order{
 		CustomerID:       &customer.ID,
 		CustomerEmail:    req.CustomerEmail,
-		CustomerName:     &customer.FullName,
+		CustomerName:     &customerName,
 		Subtotal:         totalAmount,
 		TaxAmount:        0,
 		ServiceFeeAmount: 0,
@@ -111,13 +128,22 @@ func (s *OrderService) CreateOrder(ctx context.Context, req *orderdto.CreateOrde
 		UpdatedAt:        time.Now(),
 	}
 
-	err = s.orderRepo.Create(ctx, order)
+	err = s.orderRepo.CreateTx(ctx, tx, order)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create order: %w", err)
 	}
 
+	for _, orderItem := range orderItems {
+		orderItem.OrderID = order.ID
+
+		if err := s.orderRepo.AddItemTx(ctx, tx, orderItem); err != nil {
+			return nil, nil, fmt.Errorf("failed to create order item: %w", err)
+		}
+	}
+
 	for _, ticket := range tickets {
 		ticket.OrderID = &order.ID
+
 		err = s.ticketRepo.UpdateTx(ctx, tx, ticket)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to associate ticket to order: %w", err)

@@ -7,21 +7,6 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// CreateTicketRequest para crear un ticket
-type CreateTicketRequest struct {
-	EventID      string `json:"event_id" validate:"required"`
-	CustomerID   string `json:"customer_id" validate:"required"`
-	TicketTypeID string `json:"ticketTypeId" validate:"required"`
-	Quantity     int32  `json:"quantity" validate:"required,min=1,max=10"`
-	UserID       string `json:"user_id,omitempty"`
-}
-
-// Validate valida la estructura
-func (r *CreateTicketRequest) Validate() error {
-	validate := validator.New()
-	return validate.Struct(r)
-}
-
 // UpdateTicketRequest para actualizar un ticket
 type UpdateTicketRequest struct {
 	AttendeeName  *string `json:"attendee_name,omitempty"`
@@ -64,10 +49,4 @@ type TransferTicketRequest struct {
 	FromCustomerID string `json:"from_customer_id" validate:"required"`
 	ToCustomerID   string `json:"to_customer_id" validate:"required"`
 	Token          string `json:"token,omitempty"`
-}
-
-// PurchaseTicketRequest para comprar un ticket reservado
-type PurchaseTicketRequest struct {
-	TicketID   string `json:"ticket_id" validate:"required"`
-	CustomerID string `json:"customer_id" validate:"required"`
 }

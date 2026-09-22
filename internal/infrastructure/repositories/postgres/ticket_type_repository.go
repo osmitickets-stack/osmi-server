@@ -867,27 +867,6 @@ func (r *TicketTypeRepository) ReleaseReservation(ctx context.Context, ticketTyp
 	return nil
 }
 
-// SellTickets vende tickets (convierte reservas en ventas)
-func (r *TicketTypeRepository) SellTickets(ctx context.Context, ticketTypeID int64, quantity int) error {
-	query := `
-	    UPDATE ticketing.ticket_types
-    SET reserved_quantity = reserved_quantity + $1,
-        updated_at = NOW()
-    WHERE id = $2 
-    AND (total_quantity - sold_quantity - reserved_quantity) >= $1
-    RETURNING id
-`
-	var id int64
-	err := r.db.QueryRow(ctx, query, quantity, ticketTypeID).Scan(&id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("not enough reserved tickets to sell")
-		}
-		return r.handleError(err, "failed to sell tickets")
-	}
-	return nil
-}
-
 // CancelSoldTickets cancela tickets vendidos
 func (r *TicketTypeRepository) CancelSoldTickets(ctx context.Context, ticketTypeID int64, quantity int) error {
 	query := `
@@ -1162,48 +1141,6 @@ func (r *TicketTypeRepository) GetEventTicketStats(ctx context.Context, eventID 
 	return &stats, nil
 }
 
-// SellTicketsDirect vende tickets directamente sin reserva previa
-func (r *TicketTypeRepository) SellTicketsDirect(ctx context.Context, ticketTypeID int64, quantity int) error {
-	query := `
-        UPDATE ticketing.ticket_types
-        SET sold_quantity = sold_quantity + $1,
-            updated_at = NOW()
-        WHERE id = $2 
-        AND (total_quantity - sold_quantity - reserved_quantity) >= $1
-        RETURNING id
-    `
-	var id int64
-	err := r.db.QueryRow(ctx, query, quantity, ticketTypeID).Scan(&id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("not enough tickets available to sell")
-		}
-		return r.handleError(err, "failed to sell tickets directly")
-	}
-	return nil
-}
-
-// ConfirmReservation confirma una reserva (la convierte en venta)
-func (r *TicketTypeRepository) ConfirmReservation(ctx context.Context, ticketTypeID int64, quantity int) error {
-	query := `
-		UPDATE ticketing.ticket_types
-		SET sold_quantity = sold_quantity + $1,
-			reserved_quantity = reserved_quantity - $1,
-			updated_at = NOW()
-		WHERE id = $2 AND reserved_quantity >= $1
-		RETURNING id
-	`
-	var id int64
-	err := r.db.QueryRow(ctx, query, quantity, ticketTypeID).Scan(&id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("not enough reserved tickets to confirm")
-		}
-		return r.handleError(err, "failed to confirm reservation")
-	}
-	return nil
-}
-
 // ============================================================================
 // OPERACIONES DE INVENTARIO CON TRANSACCIÓN
 // ============================================================================
@@ -1313,6 +1250,52 @@ func (r *TicketTypeRepository) ReleaseExpiredReservations(ctx context.Context) (
 		if err != nil {
 			return expiredCount, r.handleError(err, "failed to recalc counters")
 		}
+	}
+
+	return expiredCount, nil
+}
+
+// ReleaseExpiredReservationsTx libera todas las reservas expiradas
+// usando la transacción existente.
+func (r *TicketTypeRepository) ReleaseExpiredReservationsTx(ctx context.Context, tx pgx.Tx) (int64, error) {
+	updateTicketsQuery := `
+		UPDATE ticketing.tickets
+		SET status = 'expired',
+			reservation_expires_at = NULL,
+			updated_at = NOW()
+		WHERE status = 'reserved'
+		  AND reservation_expires_at < NOW()
+	`
+
+	result, err := tx.Exec(ctx, updateTicketsQuery)
+	if err != nil {
+		return 0, r.handleError(err, "failed to update expired tickets")
+	}
+
+	expiredCount := result.RowsAffected()
+
+	if expiredCount == 0 {
+		return 0, nil
+	}
+
+	recalcQuery := `
+		UPDATE ticketing.ticket_types tt
+		SET
+			reserved_quantity = COALESCE(r.real_reserved, 0),
+			sold_quantity = COALESCE(r.real_sold, 0)
+		FROM (
+			SELECT
+				ticket_type_id,
+				COUNT(*) FILTER (WHERE status = 'reserved') AS real_reserved,
+				COUNT(*) FILTER (WHERE status IN ('sold', 'checked_in')) AS real_sold
+			FROM ticketing.tickets
+			GROUP BY ticket_type_id
+		) r
+		WHERE tt.id = r.ticket_type_id
+	`
+
+	if _, err := tx.Exec(ctx, recalcQuery); err != nil {
+		return expiredCount, r.handleError(err, "failed to recalc counters")
 	}
 
 	return expiredCount, nil

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"time"
 
 	paymentdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/payment"
@@ -26,6 +27,107 @@ type PaymentService struct {
 	stripeClient   *payment.StripeClient
 	webhookSecret  string
 	emailClient    *email.SESClient
+}
+
+type OrderConfirmationItem struct {
+	TicketTypeID   string
+	TicketTypeName string
+	Quantity       int
+	UnitPrice      float64
+	TotalPrice     float64
+	EventName      string
+}
+
+type OrderConfirmation struct {
+	OrderID       string
+	OrderStatus   string
+	PaymentStatus string
+	CustomerEmail string
+	CustomerName  string
+	TotalAmount   float64
+	Currency      string
+	Items         []OrderConfirmationItem
+}
+
+func (s *PaymentService) GetOrderConfirmation(
+	ctx context.Context,
+	orderID string,
+	paymentIntentID string,
+) (*OrderConfirmation, error) {
+	if orderID == "" {
+		return nil, fmt.Errorf("order_id is required")
+	}
+	if paymentIntentID == "" {
+		return nil, fmt.Errorf("payment_intent_id is required")
+	}
+
+	paymentEntity, err := s.paymentRepo.FindByTransactionID(ctx, paymentIntentID)
+	if err != nil {
+		return nil, fmt.Errorf("payment not found: %w", err)
+	}
+
+	order, err := s.orderRepo.FindByPublicID(ctx, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("order not found: %w", err)
+	}
+
+	if paymentEntity.OrderID != order.ID {
+		return nil, fmt.Errorf("payment does not belong to order")
+	}
+
+	items, err := s.orderRepo.GetItems(ctx, order.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get order items: %w", err)
+	}
+
+	confirmationItems := make([]OrderConfirmationItem, 0, len(items))
+
+	for _, item := range items {
+		ticketType, err := s.ticketTypeRepo.FindByID(ctx, item.TicketTypeID)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"failed to get ticket type %d: %w",
+				item.TicketTypeID,
+				err,
+			)
+		}
+
+		eventName := ""
+		if ticketType != nil {
+			event, err := s.eventRepo.GetByID(ctx, ticketType.EventID)
+			if err == nil && event != nil {
+				eventName = event.Name
+			}
+		}
+
+		confirmationItems = append(
+			confirmationItems,
+			OrderConfirmationItem{
+				TicketTypeID:   ticketType.PublicID,
+				TicketTypeName: ticketType.Name,
+				Quantity:       item.Quantity,
+				UnitPrice:      item.UnitPrice,
+				TotalPrice:     item.TotalPrice,
+				EventName:      eventName,
+			},
+		)
+	}
+
+	customerName := ""
+	if order.CustomerName != nil {
+		customerName = *order.CustomerName
+	}
+
+	return &OrderConfirmation{
+		OrderID:       order.PublicID,
+		OrderStatus:   order.Status,
+		PaymentStatus: order.PaymentStatus,
+		CustomerEmail: order.CustomerEmail,
+		CustomerName:  customerName,
+		TotalAmount:   order.TotalAmount,
+		Currency:      order.Currency,
+		Items:         confirmationItems,
+	}, nil
 }
 
 func NewPaymentService(
@@ -143,103 +245,221 @@ func (s *PaymentService) HandleWebhook(
 	payload []byte,
 	signatureHeader string,
 ) error {
-
 	event, err := webhook.ConstructEventWithOptions(
-		payload, signatureHeader, s.webhookSecret,
-		webhook.ConstructEventOptions{IgnoreAPIVersionMismatch: true},
+		payload,
+		signatureHeader,
+		s.webhookSecret,
+		webhook.ConstructEventOptions{
+			IgnoreAPIVersionMismatch: true,
+		},
 	)
 	if err != nil {
 		return fmt.Errorf("invalid webhook signature: %w", err)
 	}
 
-	if err := s.paymentRepo.SaveStripeEvent(ctx, event.ID, string(event.Type), event.Data.Raw); err != nil {
-		log.Printf("⚠️ Error guardando stripe_event %s: %v", event.ID, err)
+	// Registrar el evento antes de procesarlo.
+	//
+	// SaveStripeEvent:
+	//   true  -> evento insertado ahora
+	//   false -> event_id ya existía
+	//
+	// La existencia del evento NO significa que haya terminado
+	// satisfactoriamente. processed_at es la fuente de verdad.
+	inserted, err := s.paymentRepo.SaveStripeEvent(
+		ctx,
+		event.ID,
+		string(event.Type),
+		event.Data.Raw,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"failed to persist stripe event %s: %w",
+			event.ID,
+			err,
+		)
 	}
 
-	switch event.Type {
-
-	case "payment_intent.succeeded":
-
-		var paymentIntent stripe.PaymentIntent
-		if err := json.Unmarshal(event.Data.Raw, &paymentIntent); err != nil {
-			return fmt.Errorf("failed to parse payment intent: %w", err)
-		}
-
-		paymentEntity, err := s.paymentRepo.FindByTransactionID(ctx, paymentIntent.ID)
+	if !inserted {
+		processed, err := s.paymentRepo.IsStripeEventProcessed(ctx, event.ID)
 		if err != nil {
-			return fmt.Errorf("payment not found for transaction %s: %w", paymentIntent.ID, err)
+			return fmt.Errorf(
+				"failed to check stripe event %s processing status: %w",
+				event.ID,
+				err,
+			)
 		}
 
-		if paymentEntity.Status == "completed" || paymentEntity.Status == "refunded" {
-			log.Printf("ℹ️ Payment already processed: %s", paymentIntent.ID)
+		if processed {
+			log.Printf(
+				"ℹ️ Stripe event already processed: %s",
+				event.ID,
+			)
 			return nil
 		}
 
-		now := time.Now()
-		paymentEntity.Status = "completed"
-		paymentEntity.ProcessedAt = &now
-		paymentEntity.UpdatedAt = now
+		log.Printf(
+			"ℹ️ Retrying incomplete Stripe event: %s",
+			event.ID,
+		)
+	}
 
-		if err := s.paymentRepo.Update(ctx, paymentEntity); err != nil {
-			return fmt.Errorf("failed to update payment: %w", err)
+	switch event.Type {
+	case "payment_intent.succeeded":
+		var paymentIntent stripe.PaymentIntent
+		if err := json.Unmarshal(event.Data.Raw, &paymentIntent); err != nil {
+			return fmt.Errorf(
+				"failed to parse payment intent: %w",
+				err,
+			)
+		}
+
+		paymentEntity, err := s.paymentRepo.FindByTransactionID(
+			ctx,
+			paymentIntent.ID,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"payment not found for transaction %s: %w",
+				paymentIntent.ID,
+				err,
+			)
+		}
+
+		// Un pago reembolsado no debe volver a entrar al fulfillment.
+		if paymentEntity.Status == "refunded" {
+			log.Printf(
+				"ℹ️ Ignoring payment_intent.succeeded for refunded payment: %s",
+				paymentIntent.ID,
+			)
+			break
 		}
 
 		orderPublicID := paymentIntent.Metadata["order_id"]
 		if orderPublicID == "" {
-			return fmt.Errorf("order_id not found in payment intent metadata")
+			return fmt.Errorf(
+				"order_id not found in payment intent metadata",
+			)
 		}
 
-		order, err := s.orderRepo.FindByPublicID(ctx, orderPublicID)
-		if err != nil {
-			return fmt.Errorf("order not found for public_id %s: %w", orderPublicID, err)
-		}
+		now := time.Now()
 
-		order.PaymentStatus = "paid"
-		order.UpdatedAt = now
+		// IMPORTANTE:
+		// payment=completed NO significa que el fulfillment terminó.
+		// Un retry puede encontrar:
+		//
+		// payment = completed
+		// order.payment_status = paid
+		// order.status = pending
+		//
+		// y debe continuar hasta ProcessPaidOrder.
+		if paymentEntity.Status != "completed" {
+			paymentEntity.Status = "completed"
+			paymentEntity.ProcessedAt = &now
+			paymentEntity.UpdatedAt = now
 
-		if err := s.orderRepo.Update(ctx, order); err != nil {
-			return fmt.Errorf("failed to update order payment status: %w", err)
-		}
-
-		go func(orderID string) {
-			bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer cancel()
-
-			if err := s.ProcessPaidOrder(bgCtx, orderID); err != nil {
-				log.Printf("⚠️ Error procesando orden %s: %v", orderID, err)
+			if err := s.paymentRepo.Update(ctx, paymentEntity); err != nil {
+				return fmt.Errorf(
+					"failed to update payment: %w",
+					err,
+				)
 			}
-		}(orderPublicID)
+		}
 
-		return nil
+		order, err := s.orderRepo.FindByPublicID(
+			ctx,
+			orderPublicID,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"order not found for public_id %s: %w",
+				orderPublicID,
+				err,
+			)
+		}
+
+		if order.PaymentStatus != "paid" {
+			order.PaymentStatus = "paid"
+			order.PaidAt = &now
+			order.UpdatedAt = now
+
+			if err := s.orderRepo.Update(ctx, order); err != nil {
+				return fmt.Errorf(
+					"failed to update order payment status: %w",
+					err,
+				)
+			}
+		}
+
+		// Fulfillment síncrono.
+		//
+		// No responder éxito al webhook hasta que:
+		// RESERVED -> SOLD
+		// inventory -> confirmed
+		// order -> COMPLETED
+		//
+		// hayan terminado correctamente.
+		if err := s.ProcessPaidOrder(ctx, orderPublicID); err != nil {
+			return fmt.Errorf(
+				"failed to fulfill paid order %s: %w",
+				orderPublicID,
+				err,
+			)
+		}
 
 	case "payment_intent.payment_failed":
-
 		var paymentIntent stripe.PaymentIntent
 		if err := json.Unmarshal(event.Data.Raw, &paymentIntent); err != nil {
-			return fmt.Errorf("failed to parse failed payment intent: %w", err)
+			return fmt.Errorf(
+				"failed to parse failed payment intent: %w",
+				err,
+			)
 		}
 
-		paymentEntity, err := s.paymentRepo.FindByTransactionID(ctx, paymentIntent.ID)
+		paymentEntity, err := s.paymentRepo.FindByTransactionID(
+			ctx,
+			paymentIntent.ID,
+		)
 		if err != nil {
-			return nil
+			return fmt.Errorf(
+				"payment not found for failed transaction %s: %w",
+				paymentIntent.ID,
+				err,
+			)
 		}
 
-		if paymentEntity.Status == "completed" {
-			return nil
+		// Un payment_intent.payment_failed retrasado no debe degradar
+		// un pago que ya llegó a completed.
+		if paymentEntity.Status != "completed" &&
+			paymentEntity.Status != "refunded" {
+
+			paymentEntity.Status = "failed"
+			paymentEntity.UpdatedAt = time.Now()
+
+			if err := s.paymentRepo.Update(ctx, paymentEntity); err != nil {
+				return fmt.Errorf(
+					"failed to update failed payment: %w",
+					err,
+				)
+			}
 		}
-
-		paymentEntity.Status = "failed"
-		paymentEntity.UpdatedAt = time.Now()
-
-		if err := s.paymentRepo.Update(ctx, paymentEntity); err != nil {
-			return fmt.Errorf("failed to update failed payment: %w", err)
-		}
-
-		return nil
 
 	default:
-		return nil
+		// Los eventos que OSMI no necesita manejar también se consideran
+		// procesados después de haber sido verificados y registrados.
 	}
+
+	if err := s.paymentRepo.MarkStripeEventProcessed(
+		ctx,
+		event.ID,
+	); err != nil {
+		return fmt.Errorf(
+			"failed to mark stripe event %s as processed: %w",
+			event.ID,
+			err,
+		)
+	}
+
+	return nil
 }
 
 func (s *PaymentService) ProcessPaidOrder(
@@ -290,8 +510,9 @@ func (s *PaymentService) ProcessPaidOrder(
 		)
 	}
 
-	items, err := s.orderRepo.GetItems(
+	items, err := s.orderRepo.GetItemsTx(
 		ctx,
+		tx,
 		order.ID,
 	)
 	if err != nil {
@@ -305,26 +526,105 @@ func (s *PaymentService) ProcessPaidOrder(
 	// PROCESS TICKETS
 	// ========================================================
 	// Buscar tickets asociados a esta orden directamente
-	orderTickets, _, err := s.ticketRepo.Find(ctx, &repository.TicketFilter{
-		OrderID: &order.ID,
-	})
+	orderTickets, err := s.ticketRepo.FindByOrderIDForUpdate(
+		ctx,
+		tx,
+		order.ID,
+	)
 
 	if err != nil {
 		return fmt.Errorf("failed to get tickets for order: %w", err)
 	}
 
-	var firstTicketCode string
+	// ========================================================
+	// VALIDATE FULFILLMENT
+	// ========================================================
+
+	if len(items) == 0 {
+		return fmt.Errorf("order %s has no order items", order.PublicID)
+	}
+
+	if len(orderTickets) == 0 {
+		return fmt.Errorf("order %s has no tickets", order.PublicID)
+	}
+
+	// Cantidad que la orden espera por ticket_type_id.
+	expectedByType := make(map[int64]int)
+
+	for _, item := range items {
+		if item.Quantity <= 0 {
+			return fmt.Errorf(
+				"invalid quantity %d for ticket type %d in order %s",
+				item.Quantity,
+				item.TicketTypeID,
+				order.PublicID,
+			)
+		}
+
+		expectedByType[item.TicketTypeID] += item.Quantity
+	}
+
+	// Cantidad real de tickets RESERVED por ticket_type_id.
+	reservedByType := make(map[int64]int)
 
 	for _, ticket := range orderTickets {
-		if firstTicketCode == "" {
-			firstTicketCode = ticket.Code
+		if ticket == nil {
+			return fmt.Errorf(
+				"nil ticket found in order %s",
+				order.PublicID,
+			)
 		}
 
 		if ticket.Status != "reserved" {
-			continue
+			return fmt.Errorf(
+				"ticket %s in order %s has invalid fulfillment status %q; expected reserved",
+				ticket.PublicID,
+				order.PublicID,
+				ticket.Status,
+			)
 		}
 
-		now := time.Now()
+		if _, exists := expectedByType[ticket.TicketTypeID]; !exists {
+			return fmt.Errorf(
+				"ticket %s references unexpected ticket type %d in order %s",
+				ticket.PublicID,
+				ticket.TicketTypeID,
+				order.PublicID,
+			)
+		}
+
+		reservedByType[ticket.TicketTypeID]++
+	}
+
+	// Validar exactamente lo comprado contra los tickets reservados.
+	for ticketTypeID, expectedQuantity := range expectedByType {
+		reservedQuantity := reservedByType[ticketTypeID]
+
+		if reservedQuantity != expectedQuantity {
+			return fmt.Errorf(
+				"ticket quantity mismatch for order %s, ticket type %d: expected %d reserved tickets, found %d",
+				order.PublicID,
+				ticketTypeID,
+				expectedQuantity,
+				reservedQuantity,
+			)
+		}
+	}
+
+	if len(reservedByType) != len(expectedByType) {
+		return fmt.Errorf(
+			"ticket type mismatch in order %s",
+			order.PublicID,
+		)
+	}
+
+	// ========================================================
+	// RESERVED -> SOLD
+	// ========================================================
+
+	now := time.Now()
+
+	for _, ticket := range orderTickets {
 		ticket.Status = "sold"
 		ticket.SoldAt = &now
 		ticket.ReservedAt = nil
@@ -332,11 +632,45 @@ func (s *PaymentService) ProcessPaidOrder(
 		ticket.UpdatedAt = now
 
 		if err := s.ticketRepo.UpdateTx(ctx, tx, ticket); err != nil {
-			return fmt.Errorf("failed to update ticket: %w", err)
+			return fmt.Errorf(
+				"failed to mark ticket %s as sold: %w",
+				ticket.PublicID,
+				err,
+			)
 		}
+	}
 
-		if err := s.ticketTypeRepo.ConfirmReservationTx(ctx, tx, ticket.TicketTypeID, 1); err != nil {
-			return fmt.Errorf("failed to confirm reservation: %w", err)
+	// ========================================================
+	// CONFIRM INVENTORY
+	// ========================================================
+
+	// Bloquear/actualizar ticket types siempre en orden determinista.
+	// Esto reduce el riesgo de deadlocks entre checkouts concurrentes.
+	ticketTypeIDs := make([]int64, 0, len(expectedByType))
+
+	for ticketTypeID := range expectedByType {
+		ticketTypeIDs = append(ticketTypeIDs, ticketTypeID)
+	}
+
+	sort.Slice(ticketTypeIDs, func(i, j int) bool {
+		return ticketTypeIDs[i] < ticketTypeIDs[j]
+	})
+
+	for _, ticketTypeID := range ticketTypeIDs {
+		quantity := expectedByType[ticketTypeID]
+
+		if err := s.ticketTypeRepo.ConfirmReservationTx(
+			ctx,
+			tx,
+			ticketTypeID,
+			quantity,
+		); err != nil {
+			return fmt.Errorf(
+				"failed to confirm reservation for ticket type %d, quantity %d: %w",
+				ticketTypeID,
+				quantity,
+				err,
+			)
 		}
 	}
 
@@ -392,94 +726,173 @@ func (s *PaymentService) ProcessPaidOrder(
 	)
 
 	// ========================================================
-	// DEBUG EMAIL
+	// SEND TICKETS EMAIL AFTER COMMIT
 	// ========================================================
 
-	log.Printf(
-		"DEBUG EMAIL -> emailClient nil? %v",
-		s.emailClient == nil,
-	)
-
-	log.Printf(
-		"DEBUG EMAIL -> customerEmail: '%s'",
-		order.CustomerEmail,
-	)
-
-	// ========================================================
-	// SEND EMAIL
-	// ========================================================
-
-	if s.emailClient != nil && order.CustomerEmail != "" {
-
-		customerName := "Invitado"
-
-		if order.CustomerName != nil {
-			customerName = *order.CustomerName
-		}
-
-		eventName := "Tu evento en osmi"
-		eventDate := ""
-		eventLocation := ""
-		ticketCode := firstTicketCode
-		if ticketCode == "" {
-			ticketCode = "N/A"
-		}
-
-		if len(items) > 0 {
-
-			ticketType, err := s.ticketTypeRepo.FindByID(
-				ctx,
-				items[0].TicketTypeID,
-			)
-			if err == nil && ticketType != nil {
-
-				event, err := s.eventRepo.GetByID(
-					ctx,
-					ticketType.EventID,
-				)
-				if err == nil && event != nil {
-
-					eventName = event.Name
-
-					eventDate = event.StartsAt.Format(
-						"02/01/2006 15:04",
-					)
-
-					if event.VenueName != nil {
-						eventLocation = *event.VenueName
-					}
-				}
-			}
-		}
-
-		qrBase64, _ := qr.GenerateQRBase64(ticketCode)
-
-		if err := s.emailClient.SendTicketEmail(
+	if err := s.sendOrderTicketsEmail(
+		ctx,
+		order,
+		orderTickets,
+	); err != nil {
+		log.Printf(
+			"⚠️ Ticket email delivery failed for order %s: %v",
+			order.PublicID,
+			err,
+		)
+	} else {
+		log.Printf(
+			"📧 Ticket email sent for order %s to %s",
+			order.PublicID,
 			order.CustomerEmail,
-			customerName,
-			eventName,
-			eventDate,
-			eventLocation,
-			ticketCode,
-			qrBase64,
-		); err != nil {
-
-			log.Printf(
-				"⚠️ Error enviando email para orden %s: %v",
-				order.PublicID,
-				err,
-			)
-
-		} else {
-
-			log.Printf(
-				"📧 Email enviado a %s",
-				order.CustomerEmail,
-			)
-		}
+		)
 	}
 
 	return nil
+}
+
+func (s *PaymentService) sendOrderTicketsEmail(
+	ctx context.Context,
+	order *entities.Order,
+	orderTickets []*entities.Ticket,
+) error {
+	if s.emailClient == nil {
+		return fmt.Errorf("email client is not configured")
+	}
+
+	if order == nil {
+		return fmt.Errorf("order is nil")
+	}
+
+	if order.CustomerEmail == "" {
+		return fmt.Errorf(
+			"order %s has no customer email",
+			order.PublicID,
+		)
+	}
+
+	if len(orderTickets) == 0 {
+		return fmt.Errorf(
+			"order %s has no tickets to email",
+			order.PublicID,
+		)
+	}
+
+	customerName := "Cliente osmi"
+
+	if order.CustomerName != nil &&
+		*order.CustomerName != "" {
+		customerName = *order.CustomerName
+	}
+
+	emailTickets := make(
+		[]email.TicketEmailItem,
+		0,
+		len(orderTickets),
+	)
+
+	for _, ticket := range orderTickets {
+		if ticket == nil {
+			return fmt.Errorf(
+				"order %s contains a nil ticket",
+				order.PublicID,
+			)
+		}
+
+		if ticket.Status != "sold" {
+			return fmt.Errorf(
+				"ticket %s is not sold; current status: %s",
+				ticket.PublicID,
+				ticket.Status,
+			)
+		}
+
+		if ticket.Code == "" {
+			return fmt.Errorf(
+				"ticket %s has empty code",
+				ticket.PublicID,
+			)
+		}
+
+		ticketType, err := s.ticketTypeRepo.FindByID(
+			ctx,
+			ticket.TicketTypeID,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to load ticket type %d for ticket %s: %w",
+				ticket.TicketTypeID,
+				ticket.PublicID,
+				err,
+			)
+		}
+
+		if ticketType == nil {
+			return fmt.Errorf(
+				"ticket type %d not found for ticket %s",
+				ticket.TicketTypeID,
+				ticket.PublicID,
+			)
+		}
+
+		event, err := s.eventRepo.GetByID(
+			ctx,
+			ticket.EventID,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to load event %d for ticket %s: %w",
+				ticket.EventID,
+				ticket.PublicID,
+				err,
+			)
+		}
+
+		if event == nil {
+			return fmt.Errorf(
+				"event %d not found for ticket %s",
+				ticket.EventID,
+				ticket.PublicID,
+			)
+		}
+
+		eventLocation := ""
+
+		if event.VenueName != nil {
+			eventLocation = *event.VenueName
+		}
+
+		qrBase64, err := qr.GenerateQRBase64(
+			ticket.Code,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to generate QR for ticket %s: %w",
+				ticket.PublicID,
+				err,
+			)
+		}
+
+		emailTickets = append(
+			emailTickets,
+			email.TicketEmailItem{
+				TicketCode:     ticket.Code,
+				TicketTypeName: ticketType.Name,
+				EventName:      event.Name,
+				EventDate: event.StartsAt.Format(
+					"02/01/2006 15:04",
+				),
+				EventLocation: eventLocation,
+				QRBase64:      qrBase64,
+			},
+		)
+	}
+
+	return s.emailClient.SendOrderTicketsEmail(
+		order.CustomerEmail,
+		customerName,
+		order.PublicID,
+		emailTickets,
+	)
 }
 
 func (s *PaymentService) CreatePaymentIntent(

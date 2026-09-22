@@ -106,4 +106,5 @@ type TicketRepository interface {
 	GetReservedExpired(ctx context.Context) ([]*entities.Ticket, error)
 
 	GetByPublicIDForUpdate(ctx context.Context, tx pgx.Tx, publicID string) (*entities.Ticket, error)
+	FindByOrderIDForUpdate(ctx context.Context, tx pgx.Tx, orderID int64) ([]*entities.Ticket, error)
 }

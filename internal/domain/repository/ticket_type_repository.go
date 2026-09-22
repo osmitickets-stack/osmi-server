@@ -19,7 +19,6 @@ type TicketTypeRepository interface {
 	Update(ctx context.Context, ticketType *entities.TicketType) error
 	Delete(ctx context.Context, id int64) error
 	SoftDelete(ctx context.Context, publicID string) error
-	SellTicketsDirect(ctx context.Context, ticketTypeID int64, quantity int) error
 
 	// Búsquedas
 	List(ctx context.Context, filter tickettypedto.TicketTypeFilter, pagination commondto.Pagination) ([]*entities.TicketType, int64, error)
@@ -32,7 +31,6 @@ type TicketTypeRepository interface {
 	UpdateQuantity(ctx context.Context, ticketTypeID int64, quantity int) error
 	ReserveTickets(ctx context.Context, ticketTypeID int64, quantity int) error
 	ReleaseReservation(ctx context.Context, ticketTypeID int64, quantity int) error
-	SellTickets(ctx context.Context, ticketTypeID int64, quantity int) error
 	CancelSoldTickets(ctx context.Context, ticketTypeID int64, quantity int) error
 	RefundTickets(ctx context.Context, ticketTypeID int64, quantity int) error
 	CheckAvailability(ctx context.Context, ticketTypeID int64, quantity int) (bool, error)
@@ -48,7 +46,6 @@ type TicketTypeRepository interface {
 	CountReserved(ctx context.Context, ticketTypeID int64) (int, error)
 	GetRevenue(ctx context.Context, ticketTypeID int64) (float64, error)
 	GetSalesVelocity(ctx context.Context, ticketTypeID int64) (float64, error)
-	ConfirmReservation(ctx context.Context, ticketTypeID int64, quantity int) error
 
 	// Operaciones con transacción
 	ReserveTicketsTx(ctx context.Context, tx pgx.Tx, ticketTypeID int64, quantity int) error
@@ -56,5 +53,6 @@ type TicketTypeRepository interface {
 	ReleaseReservationTx(ctx context.Context, tx pgx.Tx, ticketTypeID int64, quantity int) error
 
 	ReleaseExpiredReservations(ctx context.Context) (int64, error)
+	ReleaseExpiredReservationsTx(ctx context.Context, tx pgx.Tx) (int64, error)
 	ReserveTicketWithLock(ctx context.Context, tx pgx.Tx, ticketTypeID int64, quantity int) error
 }

@@ -14,11 +14,14 @@ import (
 type OrderRepository interface {
 	// CRUD básico
 	Create(ctx context.Context, order *entities.Order) error
+	CreateTx(ctx context.Context, tx pgx.Tx, order *entities.Order) error
+	AddItemTx(ctx context.Context, tx pgx.Tx, item *entities.OrderItem) error
 	FindByID(ctx context.Context, id int64) (*entities.Order, error)
 	GetByPublicID(ctx context.Context, publicID string) (*entities.Order, error)
 	GetByCustomerID(ctx context.Context, customerID int64) ([]*entities.Order, error)
 	AddItem(ctx context.Context, item *entities.OrderItem) error
 	GetItems(ctx context.Context, orderID int64) ([]*entities.OrderItem, error)
+	GetItemsTx(ctx context.Context, tx pgx.Tx, orderID int64) ([]*entities.OrderItem, error)
 	FindByPublicID(ctx context.Context, publicID string) (*entities.Order, error)
 	Update(ctx context.Context, order *entities.Order) error
 	Delete(ctx context.Context, id int64) error
