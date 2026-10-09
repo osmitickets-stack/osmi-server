@@ -39,3 +39,18 @@ type TicketStatsResponse struct {
 	AvgTicketPrice   float64 `json:"avg_ticket_price"`
 	CheckInRate      float64 `json:"check_in_rate"`
 }
+
+// TicketCredentialValidationResponse representa el resultado
+// NO destructivo de verificar una credencial QR.
+type TicketCredentialValidationResponse struct {
+	Authentic       bool       `json:"authentic"`
+	CanCheckIn      bool       `json:"can_check_in"`
+	Result          string     `json:"result"`
+	TicketPublicID  string     `json:"ticket_public_id,omitempty"`
+	TicketCode      string     `json:"ticket_code,omitempty"`
+	EventID         int64      `json:"event_id,omitempty"`
+	TicketTypeID    int64      `json:"ticket_type_id,omitempty"`
+	Status          string     `json:"status,omitempty"`
+	CheckedInAt     *time.Time `json:"checked_in_at,omitempty"`
+	LastValidatedAt *time.Time `json:"last_validated_at,omitempty"`
+}

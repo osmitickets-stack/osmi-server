@@ -139,6 +139,16 @@ func (h *Handler) GetTicketStats(ctx context.Context, req *osmi.GetTicketStatsRe
 	return h.ticketHandler.GetTicketStats(ctx, req)
 }
 
+func (h *Handler) ValidateTicketCredential(
+	ctx context.Context,
+	req *osmi.ValidateTicketCredentialRequest,
+) (*osmi.ValidateTicketCredentialResponse, error) {
+	return h.ticketHandler.ValidateTicketCredential(
+		ctx,
+		req,
+	)
+}
+
 // ============ USERS ============
 func (h *Handler) CreateUser(ctx context.Context, req *osmi.CreateUserRequest) (*osmi.UserResponse, error) {
 	return h.userHandler.CreateUser(ctx, req)

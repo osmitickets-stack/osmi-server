@@ -148,7 +148,6 @@ type AuthResponse struct {
 
 // Authenticate verifica credenciales y devuelve el usuario autenticado
 func (s *UserService) Authenticate(ctx context.Context, email, password string) (*AuthResponse, error) {
-	log.Printf("🔐 Authenticate llamado con email: %s, password: %s", email, password)
 
 	if email == "" || password == "" {
 		return nil, errors.New("email and password are required")

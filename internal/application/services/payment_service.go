@@ -1,3 +1,5 @@
+//internal/application/services/payment_service.go
+
 package services
 
 import (
@@ -6,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"time"
 
 	paymentdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/payment"
@@ -861,8 +864,15 @@ func (s *PaymentService) sendOrderTicketsEmail(
 			eventLocation = *event.VenueName
 		}
 
+		if ticket.QRCodeData == nil || strings.TrimSpace(*ticket.QRCodeData) == "" {
+			return fmt.Errorf(
+				"ticket %s has no QR credential",
+				ticket.PublicID,
+			)
+		}
+
 		qrBase64, err := qr.GenerateQRBase64(
-			ticket.Code,
+			*ticket.QRCodeData,
 		)
 		if err != nil {
 			return fmt.Errorf(

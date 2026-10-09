@@ -30,8 +30,8 @@ func main() {
 	log.Println("🚀 OSMI Server - ARQUITECTURA COMPLETA")
 	log.Println("=======================================")
 
-	cfg := config.Load()
 	_ = godotenv.Load()
+	cfg := config.Load()
 
 	if err := database.Init(); err != nil {
 		log.Fatalf("❌ Failed to initialize database pool: %v", err)
@@ -65,6 +65,14 @@ func main() {
 
 	jwtService := security.NewJWTService(cfg.JWT.SecretKey)
 
+	ticketCredentialService, err := security.NewTicketCredentialService(
+		cfg.TicketQR.ActiveKeyID,
+		[]byte(cfg.TicketQR.SigningKey),
+	)
+	if err != nil {
+		log.Fatalf("❌ invalid ticket QR configuration: %v", err)
+	}
+
 	// ================================================
 	// SERVICIOS
 	// ================================================
@@ -84,6 +92,7 @@ func main() {
 		eventRepo,
 		customerRepo,
 		nil,
+		ticketCredentialService,
 	)
 	ticketTypeService := services.NewTicketTypeService(ticketTypeRepo, eventRepo)
 	eventService := services.NewEventService(
@@ -102,7 +111,13 @@ func main() {
 		redisClient,
 	)
 	categoryService := services.NewCategoryService(categoryRepo, eventRepo)
-	orderService := services.NewOrderService(orderRepo, customerRepo, ticketTypeRepo, ticketRepo)
+	orderService := services.NewOrderService(
+		orderRepo,
+		customerRepo,
+		ticketTypeRepo,
+		ticketRepo,
+		ticketCredentialService,
+	)
 
 	// Servicio de pagos con Stripe
 	emailClient := email.NewSESClient()

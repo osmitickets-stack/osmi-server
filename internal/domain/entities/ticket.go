@@ -18,7 +18,7 @@ type Ticket struct {
 
 	Code       string  `json:"code" db:"code"`
 	SecretHash string  `json:"-" db:"secret_hash"` // Nunca se expone en JSON
-	QRCodeData *string `json:"qr_code_data,omitempty" db:"qr_code_data"`
+	QRCodeData *string `json:"-" db:"qr_code_data"`
 
 	Status string `json:"status" db:"status"` // available, reserved, sold, checked_in, cancelled, refunded, expired
 

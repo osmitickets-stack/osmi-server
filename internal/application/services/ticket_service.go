@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,14 +16,30 @@ import (
 	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 	"github.com/osmitickets-stack/osmi-server/internal/domain/enums"
 	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
+	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
+)
+
+var (
+	ErrTicketCredentialRequired = errors.New(
+		"ticket credential is required",
+	)
+
+	ErrTicketCredentialInvalid = errors.New(
+		"ticket credential is invalid",
+	)
+
+	ErrTicketCredentialTicketNotFound = errors.New(
+		"ticket referenced by credential was not found",
+	)
 )
 
 type TicketService struct {
-	ticketRepo     repository.TicketRepository
-	ticketTypeRepo repository.TicketTypeRepository
-	eventRepo      repository.EventRepository
-	customerRepo   repository.CustomerRepository
-	orderRepo      repository.OrderRepository
+	ticketRepo       repository.TicketRepository
+	ticketTypeRepo   repository.TicketTypeRepository
+	eventRepo        repository.EventRepository
+	customerRepo     repository.CustomerRepository
+	orderRepo        repository.OrderRepository
+	ticketCredential *security.TicketCredentialService
 }
 
 func NewTicketService(
@@ -31,13 +48,15 @@ func NewTicketService(
 	eventRepo repository.EventRepository,
 	customerRepo repository.CustomerRepository,
 	orderRepo repository.OrderRepository,
+	ticketCredential *security.TicketCredentialService,
 ) *TicketService {
 	return &TicketService{
-		ticketRepo:     ticketRepo,
-		ticketTypeRepo: ticketTypeRepo,
-		eventRepo:      eventRepo,
-		customerRepo:   customerRepo,
-		orderRepo:      orderRepo,
+		ticketRepo:       ticketRepo,
+		ticketTypeRepo:   ticketTypeRepo,
+		eventRepo:        eventRepo,
+		customerRepo:     customerRepo,
+		orderRepo:        orderRepo,
+		ticketCredential: ticketCredential,
 	}
 }
 
@@ -76,16 +95,35 @@ func (s *TicketService) ReserveTicket(ctx context.Context, req *ticketdto.Reserv
 		return nil, errors.New("event does not allow reservations")
 	}
 
-	reservationExpiresAt := time.Now().Add(15 * time.Minute)
+	if s.ticketCredential == nil {
+		return nil, errors.New(
+			"ticket credential service is not configured",
+		)
+	}
+
 	now := time.Now()
+	reservationExpiresAt := now.Add(15 * time.Minute)
+
+	ticketPublicID := uuid.New().String()
+
+	qrCredential, err := s.ticketCredential.Sign(
+		ticketPublicID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to generate ticket credential: %w",
+			err,
+		)
+	}
 
 	ticket := &entities.Ticket{
-		PublicID:             uuid.New().String(),
+		PublicID:             ticketPublicID,
 		TicketTypeID:         ticketType.ID,
 		EventID:              event.ID,
 		CustomerID:           nil,
 		Code:                 s.generateTicketCode(event.ID, ticketType.ID, 0),
 		SecretHash:           uuid.New().String(),
+		QRCodeData:           &qrCredential,
 		Status:               string(enums.TicketStatusReserved),
 		FinalPrice:           ticketType.GetFinalPrice(),
 		Currency:             ticketType.Currency,
@@ -466,6 +504,72 @@ func (s *TicketService) RefundTicket(ctx context.Context, ticketID string) (*ent
 	return updatedTicket, nil
 }
 
+// ValidateTicketCredential autentica una credencial QR emitida por OSMI.
+//
+// IMPORTANTE:
+// Esta operación NO consume el ticket.
+// No modifica status, checked_in_at ni ningún otro estado.
+// Solamente:
+//  1. verifica criptográficamente la credencial;
+//  2. extrae el public UUID;
+//  3. carga el ticket actual desde PostgreSQL.
+func (s *TicketService) ValidateTicketCredential(
+	ctx context.Context,
+	credential string,
+) (*entities.Ticket, error) {
+	credential = strings.TrimSpace(credential)
+
+	if credential == "" {
+		return nil, ErrTicketCredentialRequired
+	}
+
+	if s.ticketCredential == nil {
+		return nil, errors.New(
+			"ticket credential service is not configured",
+		)
+	}
+
+	ticketPublicID, err := s.ticketCredential.Verify(
+		credential,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"%w: %v",
+			ErrTicketCredentialInvalid,
+			err,
+		)
+	}
+
+	ticket, err := s.ticketRepo.GetByPublicID(
+		ctx,
+		ticketPublicID,
+	)
+	if err != nil {
+		if errors.Is(err, repository.ErrTicketNotFound) {
+			return nil, ErrTicketCredentialTicketNotFound
+		}
+
+		return nil, fmt.Errorf(
+			"failed to load ticket from credential: %w",
+			err,
+		)
+	}
+
+	if ticket == nil {
+		return nil, ErrTicketCredentialTicketNotFound
+	}
+
+	// Defensa de consistencia.
+	//
+	// El UUID obtenido de la firma debe coincidir exactamente
+	// con el ticket recuperado de PostgreSQL.
+	if ticket.PublicID != ticketPublicID {
+		return nil, ErrTicketCredentialInvalid
+	}
+
+	return ticket, nil
+}
+
 // ValidateTicket valida un ticket por código y hash
 func (s *TicketService) ValidateTicket(ctx context.Context, code, secretHash string) (*entities.Ticket, error) {
 	ticket, err := s.ticketRepo.ValidateTicket(ctx, code, secretHash)
@@ -520,4 +624,53 @@ func stringToInt64Ptr(s string) *int64 {
 		return nil
 	}
 	return &id
+}
+
+func (s *TicketService) VerifyTicketCredential(
+	ctx context.Context,
+	credential string,
+) (*ticketdto.TicketCredentialValidationResponse, error) {
+	ticket, err := s.ValidateTicketCredential(
+		ctx,
+		credential,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &ticketdto.TicketCredentialValidationResponse{
+		Authentic:       true,
+		CanCheckIn:      false,
+		Result:          "VALID_CREDENTIAL",
+		TicketPublicID:  ticket.PublicID,
+		TicketCode:      ticket.Code,
+		EventID:         ticket.EventID,
+		TicketTypeID:    ticket.TicketTypeID,
+		Status:          ticket.Status,
+		CheckedInAt:     ticket.CheckedInAt,
+		LastValidatedAt: ticket.LastValidatedAt,
+	}
+
+	switch ticket.Status {
+	case string(enums.TicketStatusSold):
+		result.CanCheckIn = true
+		result.Result = "VALID"
+
+	case string(enums.TicketStatusCheckedIn):
+		result.Result = "ALREADY_CHECKED_IN"
+
+	case string(enums.TicketStatusReserved):
+		result.Result = "NOT_PAID"
+
+	case string(enums.TicketStatusRefunded):
+		result.Result = "REFUNDED"
+
+	case string(enums.TicketStatusCancelled):
+		result.Result = "CANCELLED"
+
+	default:
+		result.Result = "NOT_ELIGIBLE"
+	}
+
+	return result, nil
 }

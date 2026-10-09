@@ -11,7 +11,13 @@ type Config struct {
 	JWT      JWTConfig
 	Redis    RedisConfig
 	Stripe   StripeConfig
+	TicketQR TicketQRConfig
 	GRPCPort string
+}
+
+type TicketQRConfig struct {
+	ActiveKeyID string
+	SigningKey  string
 }
 
 type StripeConfig struct {
@@ -73,6 +79,10 @@ func Load() *Config {
 		Stripe: StripeConfig{
 			SecretKey:     getEnv("STRIPE_SECRET_KEY", ""),
 			WebhookSecret: getEnv("STRIPE_WEBHOOK_SECRET", ""),
+		},
+		TicketQR: TicketQRConfig{
+			ActiveKeyID: getEnv("TICKET_QR_ACTIVE_KEY_ID", "k1"),
+			SigningKey:  getEnv("TICKET_QR_SIGNING_KEY", ""),
 		},
 	}
 }

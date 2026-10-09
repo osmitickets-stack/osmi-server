@@ -52,15 +52,13 @@ func (s *JWTService) GenerateRefreshToken(userID string) (string, error) {
 }
 
 func (s *JWTService) ValidateToken(tokenString string) (*Claims, error) {
-	log.Printf("🔍 Validando token: %s", tokenString[:20]+"...")
 
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		log.Printf("🔍 Método de firma: %v", token.Method)
 		return s.secretKey, nil
 	})
 
 	if err != nil {
-		log.Printf("❌ Error parseando token: %v", err)
+		log.Printf("❌ JWT validation failed")
 		return nil, err
 	}
 
@@ -70,6 +68,5 @@ func (s *JWTService) ValidateToken(tokenString string) (*Claims, error) {
 		return nil, jwt.ErrSignatureInvalid
 	}
 
-	log.Printf("✅ Token válido para user_id: %s", claims.UserID)
 	return claims, nil
 }

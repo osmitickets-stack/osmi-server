@@ -3,8 +3,10 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -279,7 +281,7 @@ func (h *TicketHandler) ticketToProto(ticket *entities.Ticket) *osmi.TicketRespo
 		TicketId:  ticket.PublicID,
 		Status:    ticket.Status,
 		Code:      ticket.Code,
-		QrCodeUrl: helpers.SafeStringPtr(ticket.QRCodeData),
+		QrCodeUrl: "",
 		EventName: ticket.EventName,
 		EventDate: func() string {
 			if ticket.SoldAt != nil {
@@ -317,4 +319,82 @@ func (h *TicketHandler) ExpireReservations(ctx context.Context, req *osmi.Empty)
 	return &osmi.ExpireReservationsResponse{
 		ExpiredCount: int32(count),
 	}, nil
+}
+
+func (h *TicketHandler) ValidateTicketCredential(
+	ctx context.Context,
+	req *osmi.ValidateTicketCredentialRequest,
+) (*osmi.ValidateTicketCredentialResponse, error) {
+	if strings.TrimSpace(req.Credential) == "" {
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"credential is required",
+		)
+	}
+
+	result, err := h.ticketService.VerifyTicketCredential(
+		ctx,
+		req.Credential,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(
+			err,
+			services.ErrTicketCredentialRequired,
+		):
+			return nil, status.Error(
+				codes.InvalidArgument,
+				err.Error(),
+			)
+
+		case errors.Is(
+			err,
+			services.ErrTicketCredentialInvalid,
+		):
+			return nil, status.Error(
+				codes.PermissionDenied,
+				"invalid ticket credential",
+			)
+
+		case errors.Is(
+			err,
+			services.ErrTicketCredentialTicketNotFound,
+		):
+			return nil, status.Error(
+				codes.NotFound,
+				"ticket not found",
+			)
+
+		default:
+			return nil, status.Error(
+				codes.Internal,
+				"failed to validate ticket credential",
+			)
+		}
+	}
+
+	resp := &osmi.ValidateTicketCredentialResponse{
+		Authentic:    result.Authentic,
+		CanCheckIn:   result.CanCheckIn,
+		Result:       result.Result,
+		TicketId:     result.TicketPublicID,
+		TicketCode:   result.TicketCode,
+		EventId:      result.EventID,
+		TicketTypeId: result.TicketTypeID,
+		Status:       result.Status,
+	}
+
+	if result.CheckedInAt != nil {
+		resp.CheckedInAt = timestamppb.New(
+			*result.CheckedInAt,
+		)
+	}
+
+	if result.LastValidatedAt != nil {
+		resp.LastValidatedAt = timestamppb.New(
+			*result.LastValidatedAt,
+		)
+	}
+
+	return resp, nil
 }

@@ -156,8 +156,6 @@ func (h *UserHandler) DeleteUser(ctx context.Context, req *osmi.DeleteUserReques
 // Login autentica a un usuario y devuelve JWT
 func (h *UserHandler) Login(ctx context.Context, req *osmi.LoginRequest) (*osmi.LoginResponse, error) {
 
-	log.Printf("🔐 Login handler llamado con email: %s", req.Email)
-
 	if req.Email == "" {
 		return nil, status.Error(codes.InvalidArgument, "email is required")
 	}
