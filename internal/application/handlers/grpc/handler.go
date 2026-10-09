@@ -107,7 +107,10 @@ func (h *Handler) ReserveTicket(ctx context.Context, req *osmi.ReserveTicketRequ
 	return h.ticketHandler.ReserveTicket(ctx, req)
 }
 
-func (h *Handler) CheckInTicket(ctx context.Context, req *osmi.CheckInTicketRequest) (*osmi.TicketResponse, error) {
+func (h *Handler) CheckInTicket(
+	ctx context.Context,
+	req *osmi.CheckInTicketRequest,
+) (*osmi.CheckInTicketResponse, error) {
 	return h.ticketHandler.CheckInTicket(ctx, req)
 }
 

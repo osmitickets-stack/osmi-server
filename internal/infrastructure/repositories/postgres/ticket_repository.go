@@ -612,33 +612,6 @@ func (r *TicketRepository) UpdateStatus(ctx context.Context, ticketID int64, sta
 	return nil
 }
 
-// CheckIn marca un ticket como usado (check-in)
-func (r *TicketRepository) CheckIn(ctx context.Context, ticketID int64, method, location string, checkedBy *int64) error {
-	now := time.Now()
-	query := `
-        UPDATE ticketing.tickets 
-        SET status = 'checked_in', 
-            checked_in_at = $1, 
-            checked_in_by = $2, 
-            checkin_method = $3, 
-            checkin_location = $4,
-            validation_count = validation_count + 1,
-            last_validated_at = $1,
-            updated_at = $1
-        WHERE id = $5 AND status = 'sold'
-    `
-	cmdTag, err := r.db.Exec(ctx, query, now, checkedBy, method, location, ticketID)
-	if err != nil {
-		return r.handleError(err, "failed to check in ticket")
-	}
-
-	if cmdTag.RowsAffected() == 0 {
-		return repository.ErrTicketNotAvailable
-	}
-
-	return nil
-}
-
 // Reserve reserva un ticket
 func (r *TicketRepository) Reserve(ctx context.Context, ticketID int64, reservedBy int64, expiresAt time.Time) error {
 	now := time.Now()
@@ -1137,6 +1110,54 @@ func (r *TicketRepository) GetByPublicIDForUpdate(ctx context.Context, tx pgx.Tx
 	ticket.CancelledAt = cancelledAt
 	ticket.RefundedAt = refundedAt
 	return &ticket, nil
+}
+
+func (r *TicketRepository) CheckInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	ticketID int64,
+	checkedInAt time.Time,
+	method string,
+	location string,
+	checkedBy *int64,
+) error {
+	query := `
+		UPDATE ticketing.tickets
+		SET
+			status = 'checked_in',
+			checked_in_at = $1,
+			checked_in_by = $2,
+			checkin_method = $3,
+			checkin_location = $4,
+			validation_count = validation_count + 1,
+			last_validated_at = $1,
+			updated_at = $1
+		WHERE id = $5
+		  AND status = 'sold'
+		  AND checked_in_at IS NULL
+	`
+
+	cmdTag, err := tx.Exec(
+		ctx,
+		query,
+		checkedInAt,
+		checkedBy,
+		method,
+		location,
+		ticketID,
+	)
+	if err != nil {
+		return r.handleError(
+			err,
+			"failed to check in ticket in transaction",
+		)
+	}
+
+	if cmdTag.RowsAffected() != 1 {
+		return repository.ErrTicketNotAvailable
+	}
+
+	return nil
 }
 
 // FindByOrderIDForUpdate obtiene y bloquea todos los tickets de una orden.

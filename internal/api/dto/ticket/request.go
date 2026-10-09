@@ -37,10 +37,10 @@ type ReserveTicketRequest struct {
 
 // CheckInTicketRequest para marcar ticket como usado
 type CheckInTicketRequest struct {
-	TicketID  string `json:"ticket_id" validate:"required"`
-	CheckedBy string `json:"checked_by" validate:"required"`
-	Method    string `json:"method,omitempty"`
-	Location  string `json:"location,omitempty"`
+	Credential string `json:"credential" validate:"required"`
+	EventID    string `json:"event_id" validate:"required"`
+	Method     string `json:"method,omitempty"`
+	Location   string `json:"location,omitempty"`
 }
 
 // TransferTicketRequest para transferir un ticket

@@ -56,28 +56,140 @@ func (h *TicketHandler) ReserveTicket(ctx context.Context, req *osmi.ReserveTick
 }
 
 // CheckInTicket maneja el check-in de tickets
-func (h *TicketHandler) CheckInTicket(ctx context.Context, req *osmi.CheckInTicketRequest) (*osmi.TicketResponse, error) {
-	if req.TicketId == "" {
-		return nil, status.Error(codes.InvalidArgument, "ticket_id is required")
+func (h *TicketHandler) CheckInTicket(
+	ctx context.Context,
+	req *osmi.CheckInTicketRequest,
+) (*osmi.CheckInTicketResponse, error) {
+	if req == nil {
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"request is required",
+		)
 	}
-	// 🔥 COMENTADO: validación de checked_by (temporalmente)
-	// if req.CheckedBy == "" {
-	//     return nil, status.Error(codes.InvalidArgument, "checked_by is required")
-	// }
+
+	if strings.TrimSpace(req.Credential) == "" {
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"credential is required",
+		)
+	}
+
+	if strings.TrimSpace(req.EventId) == "" {
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"event_id is required",
+		)
+	}
 
 	checkinReq := &ticketdto.CheckInTicketRequest{
-		TicketID:  req.TicketId,
-		CheckedBy: req.CheckedBy, // Puede estar vacío
-		Method:    req.Method,
-		Location:  req.Location,
+		Credential: req.Credential,
+		EventID:    req.EventId,
+		Method:     req.Method,
+		Location:   req.Location,
 	}
 
-	ticket, err := h.ticketService.CheckInTicket(ctx, checkinReq)
+	result, err := h.ticketService.CheckInTicket(
+		ctx,
+		checkinReq,
+	)
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		switch {
+		case errors.Is(
+			err,
+			services.ErrTicketCredentialRequired,
+		):
+			return nil, status.Error(
+				codes.InvalidArgument,
+				"credential is required",
+			)
+
+		case errors.Is(
+			err,
+			services.ErrTicketCredentialInvalid,
+		):
+			return nil, status.Error(
+				codes.PermissionDenied,
+				"invalid ticket credential",
+			)
+
+		case errors.Is(
+			err,
+			services.ErrTicketCredentialTicketNotFound,
+		):
+			return nil, status.Error(
+				codes.NotFound,
+				"ticket not found",
+			)
+
+		case errors.Is(
+			err,
+			services.ErrTicketCheckInEventRequired,
+		):
+			return nil, status.Error(
+				codes.InvalidArgument,
+				"event_id is required",
+			)
+
+		case errors.Is(
+			err,
+			services.ErrTicketCheckInEventInvalid,
+		):
+			return nil, status.Error(
+				codes.InvalidArgument,
+				"event_id is invalid",
+			)
+
+		case errors.Is(
+			err,
+			services.ErrTicketCheckInEventNotFound,
+		):
+			return nil, status.Error(
+				codes.NotFound,
+				"event not found",
+			)
+
+		case errors.Is(
+			err,
+			services.ErrTicketCheckInMethodInvalid,
+		):
+			return nil, status.Error(
+				codes.InvalidArgument,
+				"check-in method is invalid",
+			)
+
+		case errors.Is(
+			err,
+			services.ErrTicketCheckInLocationInvalid,
+		):
+			return nil, status.Error(
+				codes.InvalidArgument,
+				"check-in location is invalid",
+			)
+
+		default:
+			return nil, status.Error(
+				codes.Internal,
+				"failed to check in ticket",
+			)
+		}
 	}
 
-	return h.ticketToProto(ticket), nil
+	resp := &osmi.CheckInTicketResponse{
+		Accepted:   result.Accepted,
+		Result:     result.Result,
+		TicketId:   result.TicketPublicID,
+		TicketCode: result.TicketCode,
+		EventId:    result.EventPublicID,
+		Status:     result.Status,
+	}
+
+	if result.CheckedInAt != nil {
+		resp.CheckedInAt = timestamppb.New(
+			*result.CheckedInAt,
+		)
+	}
+
+	return resp, nil
 }
 
 // TransferTicket maneja la transferencia de tickets

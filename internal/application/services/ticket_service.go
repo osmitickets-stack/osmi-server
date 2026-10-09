@@ -31,6 +31,42 @@ var (
 	ErrTicketCredentialTicketNotFound = errors.New(
 		"ticket referenced by credential was not found",
 	)
+
+	ErrTicketCheckInEventRequired = errors.New(
+		"event_id is required",
+	)
+
+	ErrTicketCheckInWrongEvent = errors.New(
+		"ticket does not belong to this event",
+	)
+
+	ErrTicketAlreadyCheckedIn = errors.New(
+		"ticket already checked in",
+	)
+
+	ErrTicketCheckInTooEarly = errors.New(
+		"check-in not available yet",
+	)
+
+	ErrTicketCheckInClosed = errors.New(
+		"check-in period has ended",
+	)
+
+	ErrTicketCheckInEventInvalid = errors.New(
+		"event_id is invalid",
+	)
+
+	ErrTicketCheckInEventNotFound = errors.New(
+		"check-in event was not found",
+	)
+
+	ErrTicketCheckInMethodInvalid = errors.New(
+		"check-in method is invalid",
+	)
+
+	ErrTicketCheckInLocationInvalid = errors.New(
+		"check-in location is invalid",
+	)
 )
 
 type TicketService struct {
@@ -150,54 +186,201 @@ func (s *TicketService) ReserveTicket(ctx context.Context, req *ticketdto.Reserv
 	return ticket, nil
 }
 
-// CheckInTicket marca un ticket como usado
-func (s *TicketService) CheckInTicket(ctx context.Context, req *ticketdto.CheckInTicketRequest) (*entities.Ticket, error) {
-	if req.TicketID == "" {
-		return nil, errors.New("ticket_id is required")
+// CheckInTicket consume una credencial firmada de ticket de forma atómica.
+func (s *TicketService) CheckInTicket(
+	ctx context.Context,
+	req *ticketdto.CheckInTicketRequest,
+) (*ticketdto.TicketCheckInResponse, error) {
+	if req == nil {
+		return nil, ErrTicketCredentialRequired
 	}
 
-	ticket, err := s.ticketRepo.GetByPublicID(ctx, req.TicketID)
+	credential := strings.TrimSpace(req.Credential)
+	if credential == "" {
+		return nil, ErrTicketCredentialRequired
+	}
+
+	eventPublicID := strings.TrimSpace(req.EventID)
+	if eventPublicID == "" {
+		return nil, ErrTicketCheckInEventRequired
+	}
+
+	eventUUID, err := uuid.Parse(eventPublicID)
+	if err != nil || eventUUID.String() != eventPublicID {
+		return nil, ErrTicketCheckInEventInvalid
+	}
+
+	if s.ticketCredential == nil {
+		return nil, errors.New(
+			"ticket credential service is not configured",
+		)
+	}
+
+	// Verificar la firma ANTES de tocar la base de datos.
+	// El cliente no puede elegir qué ticket consumir:
+	// el UUID proviene exclusivamente de la credencial firmada.
+	ticketPublicID, err := s.ticketCredential.Verify(credential)
 	if err != nil {
-		return nil, fmt.Errorf("ticket not found: %w", err)
+		return nil, fmt.Errorf(
+			"%w: %v",
+			ErrTicketCredentialInvalid,
+			err,
+		)
 	}
 
-	if ticket.Status != string(enums.TicketStatusSold) {
-		return nil, errors.New("ticket is not valid for check-in")
-	}
-
-	if ticket.CheckedInAt != nil {
-		return nil, errors.New("ticket already checked in")
-	}
-
-	event, err := s.eventRepo.GetByID(ctx, ticket.EventID)
+	// Resolver UUID público del evento a su ID interno.
+	event, err := s.eventRepo.GetByPublicID(ctx, eventPublicID)
 	if err != nil {
-		return nil, fmt.Errorf("event not found: %w", err)
+		return nil, fmt.Errorf(
+			"failed to load check-in event: %w",
+			err,
+		)
+	}
+	if event == nil {
+		return nil, ErrTicketCheckInEventNotFound
+	}
+
+	method := strings.TrimSpace(req.Method)
+	if method == "" {
+		method = "qr_code"
+	}
+	if len(method) > 50 {
+		return nil, ErrTicketCheckInMethodInvalid
+	}
+
+	location := strings.TrimSpace(req.Location)
+	if len(location) > 100 {
+		return nil, ErrTicketCheckInLocationInvalid
+	}
+
+	tx, err := s.ticketRepo.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to start check-in transaction: %w",
+			err,
+		)
+	}
+	defer tx.Rollback(ctx)
+
+	// Éste es el punto crítico de concurrencia.
+	//
+	// El primer scanner bloquea la fila. Un segundo scanner del
+	// mismo ticket tendrá que esperar hasta que esta transacción
+	// termine y después observará el nuevo estado checked_in.
+	ticket, err := s.ticketRepo.GetByPublicIDForUpdate(
+		ctx,
+		tx,
+		ticketPublicID,
+	)
+	if err != nil {
+		if errors.Is(err, repository.ErrTicketNotFound) {
+			return nil, ErrTicketCredentialTicketNotFound
+		}
+
+		return nil, fmt.Errorf(
+			"failed to lock ticket for check-in: %w",
+			err,
+		)
+	}
+
+	if ticket == nil {
+		return nil, ErrTicketCredentialTicketNotFound
+	}
+
+	if ticket.PublicID != ticketPublicID {
+		return nil, ErrTicketCredentialInvalid
+	}
+
+	result := &ticketdto.TicketCheckInResponse{
+		Accepted:       false,
+		Result:         "NOT_ELIGIBLE",
+		TicketPublicID: ticket.PublicID,
+		TicketCode:     ticket.Code,
+		EventPublicID:  event.PublicID,
+		Status:         ticket.Status,
+		CheckedInAt:    ticket.CheckedInAt,
+	}
+
+	// Un QR válido de otro evento jamás puede consumirse
+	// usando el contexto del evento equivocado.
+	if ticket.EventID != event.ID {
+		result.Result = "WRONG_EVENT"
+		return result, nil
+	}
+
+	// Defensa ante datos inconsistentes además del status.
+	if ticket.Status == string(enums.TicketStatusCheckedIn) ||
+		ticket.CheckedInAt != nil {
+		result.Result = "ALREADY_CHECKED_IN"
+		return result, nil
+	}
+
+	switch ticket.Status {
+	case string(enums.TicketStatusReserved):
+		result.Result = "NOT_PAID"
+		return result, nil
+
+	case string(enums.TicketStatusRefunded):
+		result.Result = "REFUNDED"
+		return result, nil
+
+	case string(enums.TicketStatusCancelled):
+		result.Result = "CANCELLED"
+		return result, nil
+
+	case string(enums.TicketStatusSold):
+		// Continúa al check-in.
+
+	default:
+		result.Result = "NOT_ELIGIBLE"
+		return result, nil
 	}
 
 	now := time.Now()
+
 	if now.Before(event.StartsAt.Add(-1 * time.Hour)) {
-		return nil, errors.New("check-in not available yet")
+		result.Result = "TOO_EARLY"
+		return result, nil
 	}
+
 	if now.After(event.EndsAt.Add(2 * time.Hour)) {
-		return nil, errors.New("check-in period has ended")
+		result.Result = "CHECKIN_CLOSED"
+		return result, nil
 	}
 
-	var validatorID *int64
-	if req.CheckedBy != "" {
-		// TODO: Validar validador cuando exista auth
-	}
+	// En 10.4 se resolverá checked_by desde la identidad
+	// autenticada/autorizada del staff. Nunca desde el request.
+	var checkedBy *int64
 
-	err = s.ticketRepo.CheckIn(ctx, ticket.ID, req.Method, req.Location, validatorID)
+	err = s.ticketRepo.CheckInTx(
+		ctx,
+		tx,
+		ticket.ID,
+		now,
+		method,
+		location,
+		checkedBy,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("check-in failed: %w", err)
+		return nil, fmt.Errorf(
+			"failed to persist atomic ticket check-in: %w",
+			err,
+		)
 	}
 
-	updatedTicket, err := s.ticketRepo.GetByID(ctx, ticket.ID)
-	if err != nil {
-		return nil, fmt.Errorf("ticket checked in but retrieval failed: %w", err)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf(
+			"failed to commit ticket check-in: %w",
+			err,
+		)
 	}
 
-	return updatedTicket, nil
+	result.Accepted = true
+	result.Result = "CHECKED_IN"
+	result.Status = string(enums.TicketStatusCheckedIn)
+	result.CheckedInAt = &now
+
+	return result, nil
 }
 
 // TransferTicket transfiere un ticket

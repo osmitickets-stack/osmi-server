@@ -93,7 +93,6 @@ type TicketRepository interface {
 
 	// --- Operaciones de Estado ---
 	UpdateStatus(ctx context.Context, ticketID int64, status enums.TicketStatus) error
-	CheckIn(ctx context.Context, ticketID int64, method, location string, checkedBy *int64) error
 	Reserve(ctx context.Context, ticketID int64, reservedBy int64, expiresAt time.Time) error
 	ReleaseReservation(ctx context.Context, ticketID int64) error
 	Transfer(ctx context.Context, ticketID int64, toCustomerID int64, transferToken string) error
@@ -106,5 +105,14 @@ type TicketRepository interface {
 	GetReservedExpired(ctx context.Context) ([]*entities.Ticket, error)
 
 	GetByPublicIDForUpdate(ctx context.Context, tx pgx.Tx, publicID string) (*entities.Ticket, error)
+	CheckInTx(
+		ctx context.Context,
+		tx pgx.Tx,
+		ticketID int64,
+		checkedInAt time.Time,
+		method string,
+		location string,
+		checkedBy *int64,
+	) error
 	FindByOrderIDForUpdate(ctx context.Context, tx pgx.Tx, orderID int64) ([]*entities.Ticket, error)
 }

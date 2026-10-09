@@ -54,3 +54,13 @@ type TicketCredentialValidationResponse struct {
 	CheckedInAt     *time.Time `json:"checked_in_at,omitempty"`
 	LastValidatedAt *time.Time `json:"last_validated_at,omitempty"`
 }
+
+type TicketCheckInResponse struct {
+	Accepted       bool       `json:"accepted"`
+	Result         string     `json:"result"`
+	TicketPublicID string     `json:"ticket_public_id,omitempty"`
+	TicketCode     string     `json:"ticket_code,omitempty"`
+	EventPublicID  string     `json:"event_public_id,omitempty"`
+	Status         string     `json:"status,omitempty"`
+	CheckedInAt    *time.Time `json:"checked_in_at,omitempty"`
+}
