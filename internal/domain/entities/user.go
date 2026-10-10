@@ -15,7 +15,7 @@ type User struct {
 	Username     *string `json:"username,omitempty" db:"username"`
 	PasswordHash string  `json:"-" db:"password_hash"`
 
-	// 🔥 NOTA: NO hay campo Role. Se determina por IsStaff e IsSuperuser
+	// NOTA: NO hay campo Role. Se determina por IsStaff e IsSuperuser
 
 	FirstName   *string    `json:"first_name,omitempty" db:"first_name"`
 	LastName    *string    `json:"last_name,omitempty" db:"last_name"`
@@ -46,6 +46,8 @@ type User struct {
 	LastActiveAt *time.Time `json:"last_active_at,omitempty" db:"last_active_at"`
 	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at" db:"updated_at"`
+
+	RoleID *int32 `json:"role_id,omitempty" db:"role_id"`
 }
 
 // UserStats para estadísticas

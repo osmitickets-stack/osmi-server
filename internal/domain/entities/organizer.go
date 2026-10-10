@@ -12,6 +12,9 @@ type Organizer struct {
 	ID       int64  `json:"id" db:"id"`
 	PublicID string `json:"public_id" db:"public_uuid"`
 
+	UserID         *int64 `json:"user_id,omitempty" db:"user_id"`
+	ApprovalStatus string `json:"approval_status" db:"approval_status"`
+
 	Name        string  `json:"name" db:"name"`
 	Slug        string  `json:"slug" db:"slug"`
 	Description *string `json:"description,omitempty" db:"description"`

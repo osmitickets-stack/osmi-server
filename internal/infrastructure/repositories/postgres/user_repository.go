@@ -69,6 +69,7 @@ func (r *UserRepository) Find(ctx context.Context, filter *repository.UserFilter
 			mfa_enabled, mfa_secret, last_login_at, last_login_ip,
 			failed_login_attempts, locked_until,
 			is_active, is_staff, is_superuser,
+			role_id,
 			last_active_at, created_at, updated_at
 		FROM auth.users
 		WHERE 1=1
@@ -253,6 +254,7 @@ func (r *UserRepository) Find(ctx context.Context, filter *repository.UserFilter
 			&user.MFAEnabled, &mfaSecret, &lastLoginAt, &lastLoginIP,
 			&user.FailedLoginAttempts, &lockedUntil,
 			&user.IsActive, &user.IsStaff, &user.IsSuperuser,
+			&user.RoleID,
 			&lastActiveAt, &user.CreatedAt, &user.UpdatedAt,
 		)
 		if err != nil {
@@ -366,6 +368,7 @@ func (r *UserRepository) Create(ctx context.Context, user *entities.User) error 
 			mfa_enabled, mfa_secret, last_login_at, last_login_ip,
 			failed_login_attempts, locked_until,
 			is_active, is_staff, is_superuser,
+			role_id,
 			last_active_at, created_at, updated_at
 		) VALUES (
 			gen_random_uuid(), $1, $2, $3, $4,
@@ -373,7 +376,7 @@ func (r *UserRepository) Create(ctx context.Context, user *entities.User) error 
 			$10, $11, $12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24,
-			$25, NOW(), NOW()
+			$25, $26, NOW(), NOW()
 		)
 		RETURNING id, public_uuid, created_at, updated_at
 	`
@@ -386,6 +389,7 @@ func (r *UserRepository) Create(ctx context.Context, user *entities.User) error 
 		user.MFAEnabled, user.MFASecret, user.LastLoginAt, user.LastLoginIP,
 		user.FailedLoginAttempts, user.LockedUntil,
 		user.IsActive, user.IsStaff, user.IsSuperuser,
+		user.RoleID,
 		user.LastActiveAt,
 	).Scan(&user.ID, &user.PublicID, &user.CreatedAt, &user.UpdatedAt)
 
@@ -409,8 +413,9 @@ func (r *UserRepository) Update(ctx context.Context, user *entities.User) error 
 			preferred_language = $7,
 			preferred_currency = $8,
 			timezone = $9,
+			role_id = $10,
 			updated_at = NOW()
-		WHERE public_uuid = $10
+		WHERE public_uuid = $11
 		RETURNING updated_at
 	`
 
@@ -419,6 +424,7 @@ func (r *UserRepository) Update(ctx context.Context, user *entities.User) error 
 		user.FirstName, user.LastName, user.FullName,
 		user.Phone, user.AvatarURL,
 		user.PreferredLanguage, user.PreferredCurrency, user.Timezone,
+		user.RoleID,
 		user.PublicID,
 	).Scan(&user.UpdatedAt)
 
@@ -796,6 +802,7 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*entiti
             mfa_enabled, mfa_secret, last_login_at, last_login_ip,
             failed_login_attempts, locked_until,
             is_active, is_staff, is_superuser,
+			role_id,
             last_active_at, created_at, updated_at
         FROM auth.users
         WHERE is_active = true
@@ -825,6 +832,7 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*entiti
 			&user.MFAEnabled, &mfaSecret, &lastLoginAt, &lastLoginIP,
 			&user.FailedLoginAttempts, &lockedUntil,
 			&user.IsActive, &user.IsStaff, &user.IsSuperuser,
+			&user.RoleID,
 			&lastActiveAt, &user.CreatedAt, &user.UpdatedAt,
 		)
 		if err != nil {

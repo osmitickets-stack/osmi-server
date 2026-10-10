@@ -62,36 +62,75 @@ func (r *OrganizerRepository) handleError(err error, context string) error {
 // ============================================================================
 
 // Create inserta un nuevo organizador
-func (r *OrganizerRepository) Create(ctx context.Context, organizer *entities.Organizer) error {
-	socialLinksJSON, err := json.Marshal(organizer.SocialLinks)
+func (r *OrganizerRepository) Create(
+	ctx context.Context,
+	organizer *entities.Organizer,
+) error {
+	socialLinksJSON, err := json.Marshal(
+		organizer.SocialLinks,
+	)
 	if err != nil {
-		return fmt.Errorf("failed to marshal social links: %w", err)
+		return fmt.Errorf(
+			"failed to marshal social links: %w",
+			err,
+		)
 	}
 
 	query := `
 		INSERT INTO ticketing.organizers (
-			public_uuid, name, slug, description, logo_url,
-			legal_name, tax_id, tax_id_type, country,
-			contact_email, contact_phone,
-			address_line1, address_line2, city, state, postal_code,
-			is_verified, is_active, verification_status,
-			total_events, total_tickets_sold, organizer_rating, rating_count,
+			public_uuid,
+			name,
+			slug,
+			description,
+			logo_url,
+			legal_name,
+			tax_id,
+			tax_id_type,
+			country,
+			contact_email,
+			contact_phone,
+			address_line1,
+			address_line2,
+			city,
+			state,
+			postal_code,
+			is_verified,
+			is_active,
+			verification_status,
+			total_events,
+			total_tickets_sold,
+			organizer_rating,
+			rating_count,
 			social_links,
-			created_at, updated_at
+			user_id,
+			approval_status,
+			created_at,
+			updated_at
 		) VALUES (
-			gen_random_uuid(), $1, $2, $3, $4,
+			gen_random_uuid(),
+			$1, $2, $3, $4,
 			$5, $6, $7, $8,
 			$9, $10,
 			$11, $12, $13, $14, $15,
 			$16, $17, $18,
 			0, 0, 0, 0,
 			$19,
-			NOW(), NOW()
+			$20,
+			COALESCE(NULLIF($21, ''), 'pending'),
+			NOW(),
+			NOW()
 		)
-		RETURNING id, public_uuid, created_at, updated_at
+		RETURNING
+			id,
+			public_uuid,
+			approval_status,
+			created_at,
+			updated_at
 	`
 
-	err = r.db.QueryRow(ctx, query,
+	err = r.db.QueryRow(
+		ctx,
+		query,
 		organizer.Name,
 		organizer.Slug,
 		organizer.Description,
@@ -111,10 +150,21 @@ func (r *OrganizerRepository) Create(ctx context.Context, organizer *entities.Or
 		organizer.IsActive,
 		organizer.VerificationStatus,
 		socialLinksJSON,
-	).Scan(&organizer.ID, &organizer.PublicID, &organizer.CreatedAt, &organizer.UpdatedAt)
+		organizer.UserID,
+		organizer.ApprovalStatus,
+	).Scan(
+		&organizer.ID,
+		&organizer.PublicID,
+		&organizer.ApprovalStatus,
+		&organizer.CreatedAt,
+		&organizer.UpdatedAt,
+	)
 
 	if err != nil {
-		return r.handleError(err, "failed to create organizer")
+		return r.handleError(
+			err,
+			"failed to create organizer",
+		)
 	}
 
 	return nil
@@ -129,6 +179,7 @@ func (r *OrganizerRepository) FindByID(ctx context.Context, id int64) (*entities
 			contact_email, contact_phone,
 			address_line1, address_line2, city, state, postal_code,
 			is_verified, is_active, verification_status,
+			user_id, approval_status,
 			total_events, total_tickets_sold, organizer_rating, rating_count,
 			social_links,
 			created_at, updated_at
@@ -147,6 +198,7 @@ func (r *OrganizerRepository) FindByID(ctx context.Context, id int64) (*entities
 		&organizer.ContactEmail, &organizer.ContactPhone,
 		&addressLine1, &addressLine2, &city, &state, &postalCode,
 		&organizer.IsVerifiedField, &organizer.IsActive, &organizer.VerificationStatus,
+		&organizer.UserID, &organizer.ApprovalStatus,
 		&organizer.TotalEvents, &organizer.TotalTicketsSold, &organizer.OrganizerRating, &organizer.RatingCount,
 		&socialLinksJSON,
 		&organizer.CreatedAt, &organizer.UpdatedAt,
@@ -184,6 +236,7 @@ func (r *OrganizerRepository) FindByPublicID(ctx context.Context, publicID strin
 			contact_email, contact_phone,
 			address_line1, address_line2, city, state, postal_code,
 			is_verified, is_active, verification_status,
+			user_id, approval_status,
 			total_events, total_tickets_sold, organizer_rating, rating_count,
 			social_links,
 			created_at, updated_at
@@ -202,6 +255,7 @@ func (r *OrganizerRepository) FindByPublicID(ctx context.Context, publicID strin
 		&organizer.ContactEmail, &organizer.ContactPhone,
 		&addressLine1, &addressLine2, &city, &state, &postalCode,
 		&organizer.IsVerifiedField, &organizer.IsActive, &organizer.VerificationStatus,
+		&organizer.UserID, &organizer.ApprovalStatus,
 		&organizer.TotalEvents, &organizer.TotalTicketsSold, &organizer.OrganizerRating, &organizer.RatingCount,
 		&socialLinksJSON,
 		&organizer.CreatedAt, &organizer.UpdatedAt,
@@ -239,6 +293,7 @@ func (r *OrganizerRepository) FindBySlug(ctx context.Context, slug string) (*ent
 			contact_email, contact_phone,
 			address_line1, address_line2, city, state, postal_code,
 			is_verified, is_active, verification_status,
+			user_id, approval_status,
 			total_events, total_tickets_sold, organizer_rating, rating_count,
 			social_links,
 			created_at, updated_at
@@ -257,6 +312,7 @@ func (r *OrganizerRepository) FindBySlug(ctx context.Context, slug string) (*ent
 		&organizer.ContactEmail, &organizer.ContactPhone,
 		&addressLine1, &addressLine2, &city, &state, &postalCode,
 		&organizer.IsVerifiedField, &organizer.IsActive, &organizer.VerificationStatus,
+		&organizer.UserID, &organizer.ApprovalStatus,
 		&organizer.TotalEvents, &organizer.TotalTicketsSold, &organizer.OrganizerRating, &organizer.RatingCount,
 		&socialLinksJSON,
 		&organizer.CreatedAt, &organizer.UpdatedAt,
@@ -286,14 +342,23 @@ func (r *OrganizerRepository) FindBySlug(ctx context.Context, slug string) (*ent
 }
 
 // Update actualiza un organizador existente
-func (r *OrganizerRepository) Update(ctx context.Context, organizer *entities.Organizer) error {
-	socialLinksJSON, err := json.Marshal(organizer.SocialLinks)
+func (r *OrganizerRepository) Update(
+	ctx context.Context,
+	organizer *entities.Organizer,
+) error {
+	socialLinksJSON, err := json.Marshal(
+		organizer.SocialLinks,
+	)
 	if err != nil {
-		return fmt.Errorf("failed to marshal social links: %w", err)
+		return fmt.Errorf(
+			"failed to marshal social links: %w",
+			err,
+		)
 	}
 
 	query := `
-		UPDATE ticketing.organizers SET
+		UPDATE ticketing.organizers
+		SET
 			name = $1,
 			slug = $2,
 			description = $3,
@@ -313,12 +378,21 @@ func (r *OrganizerRepository) Update(ctx context.Context, organizer *entities.Or
 			is_active = $17,
 			verification_status = $18,
 			social_links = $19,
+			user_id = $20,
+			approval_status = COALESCE(
+				NULLIF($21, ''),
+				approval_status
+			),
 			updated_at = NOW()
-		WHERE id = $20
-		RETURNING updated_at
+		WHERE id = $22
+		RETURNING
+			approval_status,
+			updated_at
 	`
 
-	err = r.db.QueryRow(ctx, query,
+	err = r.db.QueryRow(
+		ctx,
+		query,
 		organizer.Name,
 		organizer.Slug,
 		organizer.Description,
@@ -338,11 +412,19 @@ func (r *OrganizerRepository) Update(ctx context.Context, organizer *entities.Or
 		organizer.IsActive,
 		organizer.VerificationStatus,
 		socialLinksJSON,
+		organizer.UserID,
+		organizer.ApprovalStatus,
 		organizer.ID,
-	).Scan(&organizer.UpdatedAt)
+	).Scan(
+		&organizer.ApprovalStatus,
+		&organizer.UpdatedAt,
+	)
 
 	if err != nil {
-		return r.handleError(err, "failed to update organizer")
+		return r.handleError(
+			err,
+			"failed to update organizer",
+		)
 	}
 
 	return nil
@@ -438,6 +520,7 @@ func (r *OrganizerRepository) List(ctx context.Context, filter organizerdto.Orga
 			contact_email, contact_phone,
 			address_line1, address_line2, city, state, postal_code,
 			is_verified, is_active, verification_status,
+			user_id, approval_status,
 			total_events, total_tickets_sold, organizer_rating, rating_count,
 			social_links,
 			created_at, updated_at
@@ -469,6 +552,7 @@ func (r *OrganizerRepository) List(ctx context.Context, filter organizerdto.Orga
 			&org.ContactEmail, &org.ContactPhone,
 			&addressLine1, &addressLine2, &city, &state, &postalCode,
 			&org.IsVerifiedField, &org.IsActive, &org.VerificationStatus,
+			&org.UserID, &org.ApprovalStatus,
 			&org.TotalEvents, &org.TotalTicketsSold, &org.OrganizerRating, &org.RatingCount,
 			&socialLinksJSON,
 			&org.CreatedAt, &org.UpdatedAt,
