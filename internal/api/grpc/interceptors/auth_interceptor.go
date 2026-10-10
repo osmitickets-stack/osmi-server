@@ -3,11 +3,13 @@ package interceptors
 import (
 	"context"
 
+	osmicontext "github.com/osmitickets-stack/osmi-server/internal/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
-// UnaryServerInterceptor extrae user-id de la metadata gRPC y la pone en el contexto
+// AuthUnaryInterceptor propaga al contexto interno el public UUID
+// del usuario autenticado por el gateway.
 func AuthUnaryInterceptor(
 	ctx context.Context,
 	req interface{},
@@ -16,8 +18,12 @@ func AuthUnaryInterceptor(
 ) (interface{}, error) {
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		userIDs := md.Get("user-id")
-		if len(userIDs) > 0 {
-			ctx = context.WithValue(ctx, "user_id", userIDs[0])
+
+		if len(userIDs) > 0 && userIDs[0] != "" {
+			ctx = osmicontext.WithUserID(
+				ctx,
+				userIDs[0],
+			)
 		}
 	}
 

@@ -59,6 +59,16 @@ func WithUserID(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, UserIDKey, userID)
 }
 
+// GetUserID obtiene el public UUID del usuario autenticado.
+func GetUserID(ctx context.Context) (string, bool) {
+	userID, ok := ctx.Value(UserIDKey).(string)
+	if !ok || userID == "" {
+		return "", false
+	}
+
+	return userID, true
+}
+
 // WithIPAddress agrega IP Address al contexto
 func WithIPAddress(ctx context.Context, ip string) context.Context {
 	return context.WithValue(ctx, IPAddressKey, ip)
