@@ -20,6 +20,10 @@ import (
 )
 
 var (
+	ErrCheckInPrincipalInvalid = errors.New(
+		"check-in authorization returned invalid principal",
+	)
+
 	ErrTicketCredentialRequired = errors.New(
 		"ticket credential is required",
 	)
@@ -70,12 +74,13 @@ var (
 )
 
 type TicketService struct {
-	ticketRepo       repository.TicketRepository
-	ticketTypeRepo   repository.TicketTypeRepository
-	eventRepo        repository.EventRepository
-	customerRepo     repository.CustomerRepository
-	orderRepo        repository.OrderRepository
-	ticketCredential *security.TicketCredentialService
+	ticketRepo           repository.TicketRepository
+	ticketTypeRepo       repository.TicketTypeRepository
+	eventRepo            repository.EventRepository
+	customerRepo         repository.CustomerRepository
+	orderRepo            repository.OrderRepository
+	ticketCredential     *security.TicketCredentialService
+	checkInAuthorization CheckInAuthorizer
 }
 
 func NewTicketService(
@@ -94,6 +99,12 @@ func NewTicketService(
 		orderRepo:        orderRepo,
 		ticketCredential: ticketCredential,
 	}
+}
+
+func (s *TicketService) SetCheckInAuthorization(
+	authorization CheckInAuthorizer,
+) {
+	s.checkInAuthorization = authorization
 }
 
 // ReserveTicket reserva un ticket con bloqueo FOR UPDATE
@@ -210,13 +221,38 @@ func (s *TicketService) CheckInTicket(
 		return nil, ErrTicketCheckInEventInvalid
 	}
 
+	if s.checkInAuthorization == nil {
+		return nil, errors.New(
+			"check-in authorization service is not configured",
+		)
+	}
+
+	// Autorizar al actor ANTES de inspeccionar la credencial.
+	//
+	// Esto evita que un usuario autenticado pero no autorizado pueda
+	// utilizar el endpoint como oráculo para descubrir si un QR es válido.
+	principal, err := s.checkInAuthorization.Authorize(
+		ctx,
+		eventPublicID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if principal == nil ||
+		principal.UserID <= 0 ||
+		strings.TrimSpace(principal.UserPublicID) == "" ||
+		strings.TrimSpace(principal.AccessRole) == "" {
+		return nil, ErrCheckInPrincipalInvalid
+	}
+
 	if s.ticketCredential == nil {
 		return nil, errors.New(
 			"ticket credential service is not configured",
 		)
 	}
 
-	// Verificar la firma ANTES de tocar la base de datos.
+	// Verificar la firma DESPUÉS de autorizar al actor y ANTES de tocar la base de datos.
 	// El cliente no puede elegir qué ticket consumir:
 	// el UUID proviene exclusivamente de la credencial firmada.
 	ticketPublicID, err := s.ticketCredential.Verify(credential)
@@ -348,9 +384,8 @@ func (s *TicketService) CheckInTicket(
 		return result, nil
 	}
 
-	// En 10.4 se resolverá checked_by desde la identidad
-	// autenticada/autorizada del staff. Nunca desde el request.
-	var checkedBy *int64
+	// El actor autorizado queda registrado en tickets.checked_in_by.
+	checkedBy := principal.UserID
 
 	err = s.ticketRepo.CheckInTx(
 		ctx,
@@ -359,7 +394,7 @@ func (s *TicketService) CheckInTicket(
 		now,
 		method,
 		location,
-		checkedBy,
+		&checkedBy,
 	)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -693,17 +728,53 @@ func (s *TicketService) RefundTicket(ctx context.Context, ticketID string) (*ent
 // Esta operación NO consume el ticket.
 // No modifica status, checked_in_at ni ningún otro estado.
 // Solamente:
-//  1. verifica criptográficamente la credencial;
-//  2. extrae el public UUID;
-//  3. carga el ticket actual desde PostgreSQL.
+//  1. autoriza al usuario para el evento;
+//  2. verifica firma y pertenencia al evento;
+//  3. carga el ticket sin modificarlo.
 func (s *TicketService) ValidateTicketCredential(
 	ctx context.Context,
 	credential string,
+	eventPublicID string,
 ) (*entities.Ticket, error) {
 	credential = strings.TrimSpace(credential)
 
 	if credential == "" {
 		return nil, ErrTicketCredentialRequired
+	}
+
+	eventPublicID = strings.TrimSpace(eventPublicID)
+	if eventPublicID == "" {
+		return nil, ErrTicketCheckInEventRequired
+	}
+
+	eventUUID, err := uuid.Parse(eventPublicID)
+	if err != nil || eventUUID.String() != eventPublicID {
+		return nil, ErrTicketCheckInEventInvalid
+	}
+
+	if s.checkInAuthorization == nil {
+		return nil, errors.New(
+			"check-in authorization service is not configured",
+		)
+	}
+
+	// Autorizar al actor ANTES de inspeccionar la credencial.
+	//
+	// Esto evita que un usuario autenticado pero no autorizado pueda
+	// utilizar el endpoint como oráculo para descubrir si un QR es válido.
+	principal, err := s.checkInAuthorization.Authorize(
+		ctx,
+		eventPublicID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if principal == nil ||
+		principal.UserID <= 0 ||
+		strings.TrimSpace(principal.UserPublicID) == "" ||
+		strings.TrimSpace(principal.AccessRole) == "" {
+		return nil, ErrCheckInPrincipalInvalid
 	}
 
 	if s.ticketCredential == nil {
@@ -721,6 +792,14 @@ func (s *TicketService) ValidateTicketCredential(
 			ErrTicketCredentialInvalid,
 			err,
 		)
+	}
+
+	event, err := s.eventRepo.GetByPublicID(ctx, eventPublicID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load validation event: %w", err)
+	}
+	if event == nil {
+		return nil, ErrTicketCheckInEventNotFound
 	}
 
 	ticket, err := s.ticketRepo.GetByPublicID(
@@ -748,6 +827,10 @@ func (s *TicketService) ValidateTicketCredential(
 	// con el ticket recuperado de PostgreSQL.
 	if ticket.PublicID != ticketPublicID {
 		return nil, ErrTicketCredentialInvalid
+	}
+
+	if ticket.EventID != event.ID {
+		return nil, ErrTicketCheckInWrongEvent
 	}
 
 	return ticket, nil
@@ -812,10 +895,12 @@ func stringToInt64Ptr(s string) *int64 {
 func (s *TicketService) VerifyTicketCredential(
 	ctx context.Context,
 	credential string,
+	eventPublicID string,
 ) (*ticketdto.TicketCredentialValidationResponse, error) {
 	ticket, err := s.ValidateTicketCredential(
 		ctx,
 		credential,
+		eventPublicID,
 	)
 	if err != nil {
 		return nil, err

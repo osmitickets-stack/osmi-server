@@ -96,6 +96,33 @@ func (h *TicketHandler) CheckInTicket(
 		switch {
 		case errors.Is(
 			err,
+			services.ErrCheckInAuthenticationRequired,
+		):
+			return nil, status.Error(
+				codes.Unauthenticated,
+				"authentication required",
+			)
+
+		case errors.Is(
+			err,
+			services.ErrCheckInUserInactive,
+		):
+			return nil, status.Error(
+				codes.Unauthenticated,
+				"user is inactive",
+			)
+
+		case errors.Is(
+			err,
+			services.ErrCheckInPermissionDenied,
+		):
+			return nil, status.Error(
+				codes.PermissionDenied,
+				"not authorized to check in tickets for this event",
+			)
+
+		case errors.Is(
+			err,
 			services.ErrTicketCredentialRequired,
 		):
 			return nil, status.Error(
@@ -437,7 +464,7 @@ func (h *TicketHandler) ValidateTicketCredential(
 	ctx context.Context,
 	req *osmi.ValidateTicketCredentialRequest,
 ) (*osmi.ValidateTicketCredentialResponse, error) {
-	if strings.TrimSpace(req.Credential) == "" {
+	if strings.TrimSpace(req.GetCredential()) == "" {
 		return nil, status.Error(
 			codes.InvalidArgument,
 			"credential is required",
@@ -446,10 +473,21 @@ func (h *TicketHandler) ValidateTicketCredential(
 
 	result, err := h.ticketService.VerifyTicketCredential(
 		ctx,
-		req.Credential,
+		req.GetCredential(),
+		req.GetEventId(),
 	)
 	if err != nil {
 		switch {
+		case errors.Is(err, services.ErrCheckInAuthenticationRequired), errors.Is(err, services.ErrCheckInUserInactive):
+			return nil, status.Error(codes.Unauthenticated, "authentication required")
+		case errors.Is(err, services.ErrCheckInPermissionDenied):
+			return nil, status.Error(codes.PermissionDenied, "not authorized to validate tickets for this event")
+		case errors.Is(err, services.ErrTicketCheckInEventRequired), errors.Is(err, services.ErrTicketCheckInEventInvalid):
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		case errors.Is(err, services.ErrTicketCheckInEventNotFound):
+			return nil, status.Error(codes.NotFound, "event not found")
+		case errors.Is(err, services.ErrTicketCheckInWrongEvent):
+			return nil, status.Error(codes.PermissionDenied, "ticket does not belong to this event")
 		case errors.Is(
 			err,
 			services.ErrTicketCredentialRequired,

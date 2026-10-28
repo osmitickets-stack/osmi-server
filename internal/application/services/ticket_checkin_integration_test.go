@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	ticketdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/ticket"
+	osmicontext "github.com/osmitickets-stack/osmi-server/internal/context"
 	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/repositories/postgres"
 	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
 )
@@ -23,7 +24,9 @@ type checkInFixture struct {
 	TicketID       int64
 	TicketPublicID string
 
-	Credential string
+	Credential   string
+	UserID       int64
+	UserPublicID string
 }
 
 func newCheckInTestService(
@@ -32,6 +35,12 @@ func newCheckInTestService(
 	t.Helper()
 
 	pool := requireIntegrationDB(t)
+
+	// Extra safeguard: this marker is created ONLY on the isolated check-in DB.
+	var marker string
+	if err := pool.QueryRow(context.Background(), `SELECT marker FROM public.osmi_checkin_test_guard LIMIT 1`).Scan(&marker); err != nil || marker != "osmi-checkin-isolated-v1" {
+		t.Fatalf("REFUSING integration check-in writes: isolated database guard missing or invalid: %v", err)
+	}
 
 	credentialService, err := security.NewTicketCredentialService(
 		"test-k1",
@@ -50,7 +59,17 @@ func newCheckInTestService(
 		credentialService,
 	)
 
+	service.SetCheckInAuthorization(NewCheckInAuthorizationService(
+		postgres.NewUserRepository(pool),
+		postgres.NewEventRepository(pool),
+		postgres.NewOrganizerRepository(pool),
+		postgres.NewEventStaffRepository(pool),
+	))
 	return service, credentialService
+}
+
+func checkInAuthorizedContext(fixture *checkInFixture) context.Context {
+	return osmicontext.WithUserID(context.Background(), fixture.UserPublicID)
 }
 
 func createCheckInFixture(
@@ -63,6 +82,10 @@ func createCheckInFixture(
 	t.Helper()
 
 	pool := requireIntegrationDB(t)
+	var marker string
+	if err := pool.QueryRow(context.Background(), `SELECT marker FROM public.osmi_checkin_test_guard LIMIT 1`).Scan(&marker); err != nil || marker != "osmi-checkin-isolated-v1" {
+		t.Fatalf("REFUSING check-in fixture writes: isolated database guard missing or invalid: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
@@ -81,9 +104,20 @@ func createCheckInFixture(
 		suffix,
 	)
 
+	var userID int64
+	var userPublicID string
+	err := pool.QueryRow(ctx, `
+ INSERT INTO auth.users (email, password_hash, is_active)
+ VALUES ($1, $2, true)
+ RETURNING id, public_uuid::text
+ `, fmt.Sprintf("checkin-actor-%d@example.com", suffix), "integration-test-hash-not-for-login").Scan(&userID, &userPublicID)
+	if err != nil {
+		t.Fatalf("create check-in test user: %v", err)
+	}
+
 	var organizerID int64
 
-	err := pool.QueryRow(
+	err = pool.QueryRow(
 		ctx,
 		`
 			INSERT INTO ticketing.organizers (
@@ -132,6 +166,14 @@ func createCheckInFixture(
 	)
 	if err != nil {
 		t.Fatalf("create event fixture: %v", err)
+	}
+
+	_, err = pool.Exec(ctx, `
+ INSERT INTO ticketing.event_staff (event_id, user_id, role, is_active)
+ VALUES ($1, $2, 'checkin_staff', true)
+ `, eventID, userID)
+	if err != nil {
+		t.Fatalf("create check-in staff assignment: %v", err)
 	}
 
 	var ticketTypeID int64
@@ -264,6 +306,7 @@ func createCheckInFixture(
 			ticketTypeID,
 		)
 
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM ticketing.event_staff WHERE event_id = $1 AND user_id = $2`, eventID, userID)
 		_, _ = pool.Exec(
 			cleanupCtx,
 			`DELETE FROM ticketing.events WHERE id = $1`,
@@ -275,6 +318,7 @@ func createCheckInFixture(
 			`DELETE FROM ticketing.organizers WHERE id = $1`,
 			organizerID,
 		)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM auth.users WHERE id = $1`, userID)
 	})
 
 	return &checkInFixture{
@@ -284,6 +328,8 @@ func createCheckInFixture(
 		TicketID:       ticketID,
 		TicketPublicID: ticketPublicID,
 		Credential:     credential,
+		UserID:         userID,
+		UserPublicID:   userPublicID,
 	}
 }
 
@@ -302,7 +348,7 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 		)
 
 		result, err := service.CheckInTicket(
-			context.Background(),
+			checkInAuthorizedContext(fixture),
 			&ticketdto.CheckInTicketRequest{
 				Credential: fixture.Credential,
 				EventID:    fixture.EventPublicID,
@@ -393,12 +439,37 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 			t.Fatal("expected DB last_validated_at")
 		}
 
-		if checkedInBy != nil {
-			t.Fatalf(
-				"expected checked_in_by NULL before 10.4, got %d",
-				*checkedInBy,
-			)
+		if checkedInBy == nil || *checkedInBy != fixture.UserID {
+			t.Fatalf("expected checked_in_by=%d, got %v", fixture.UserID, checkedInBy)
 		}
+	})
+
+	t.Run("guest cannot check in and does not mutate ticket", func(t *testing.T) {
+		now := time.Now()
+		fixture := createCheckInFixture(t, credentialService, "sold", now.Add(-30*time.Minute), now.Add(2*time.Hour))
+		result, err := service.CheckInTicket(context.Background(), &ticketdto.CheckInTicketRequest{
+			Credential: fixture.Credential, EventID: fixture.EventPublicID,
+		})
+		if result != nil || !errors.Is(err, ErrCheckInAuthenticationRequired) {
+			t.Fatalf("expected unauthenticated denial, result=%+v err=%v", result, err)
+		}
+		assertCheckInTicketUnchanged(t, fixture.TicketID)
+	})
+
+	t.Run("revoked staff cannot check in and does not mutate ticket", func(t *testing.T) {
+		now := time.Now()
+		fixture := createCheckInFixture(t, credentialService, "sold", now.Add(-30*time.Minute), now.Add(2*time.Hour))
+		pool := requireIntegrationDB(t)
+		if _, err := pool.Exec(context.Background(), `UPDATE ticketing.event_staff SET is_active = false WHERE event_id = $1 AND user_id = $2`, fixture.EventID, fixture.UserID); err != nil {
+			t.Fatalf("revoke check-in staff: %v", err)
+		}
+		result, err := service.CheckInTicket(checkInAuthorizedContext(fixture), &ticketdto.CheckInTicketRequest{
+			Credential: fixture.Credential, EventID: fixture.EventPublicID,
+		})
+		if result != nil || !errors.Is(err, ErrCheckInPermissionDenied) {
+			t.Fatalf("expected permission denial, result=%+v err=%v", result, err)
+		}
+		assertCheckInTicketUnchanged(t, fixture.TicketID)
 	})
 
 	t.Run("second scan does not consume twice", func(t *testing.T) {
@@ -419,7 +490,7 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 		}
 
 		first, err := service.CheckInTicket(
-			context.Background(),
+			checkInAuthorizedContext(fixture),
 			req,
 		)
 		if err != nil {
@@ -434,7 +505,7 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 		}
 
 		second, err := service.CheckInTicket(
-			context.Background(),
+			checkInAuthorizedContext(fixture),
 			req,
 		)
 		if err != nil {
@@ -505,7 +576,7 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 			<-start
 
 			result, err := service.CheckInTicket(
-				context.Background(),
+				checkInAuthorizedContext(fixture),
 				&ticketdto.CheckInTicketRequest{
 					Credential: fixture.Credential,
 					EventID:    fixture.EventPublicID,
@@ -623,7 +694,7 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 		tampered := fixture.Credential[:len(fixture.Credential)-1] + "A"
 
 		result, err := service.CheckInTicket(
-			context.Background(),
+			checkInAuthorizedContext(fixture),
 			&ticketdto.CheckInTicketRequest{
 				Credential: tampered,
 				EventID:    fixture.EventPublicID,
@@ -699,7 +770,7 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 		)
 
 		result, err := service.CheckInTicket(
-			context.Background(),
+			checkInAuthorizedContext(otherFixture),
 			&ticketdto.CheckInTicketRequest{
 				Credential: ticketFixture.Credential,
 				EventID:    otherFixture.EventPublicID,
@@ -790,7 +861,7 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 			)
 
 			result, err := service.CheckInTicket(
-				context.Background(),
+				checkInAuthorizedContext(fixture),
 				&ticketdto.CheckInTicketRequest{
 					Credential: fixture.Credential,
 					EventID:    fixture.EventPublicID,
@@ -833,7 +904,7 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 		)
 
 		result, err := service.CheckInTicket(
-			context.Background(),
+			checkInAuthorizedContext(fixture),
 			&ticketdto.CheckInTicketRequest{
 				Credential: fixture.Credential,
 				EventID:    fixture.EventPublicID,
@@ -867,7 +938,7 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 		)
 
 		result, err := service.CheckInTicket(
-			context.Background(),
+			checkInAuthorizedContext(fixture),
 			&ticketdto.CheckInTicketRequest{
 				Credential: fixture.Credential,
 				EventID:    fixture.EventPublicID,
@@ -888,4 +959,21 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 			)
 		}
 	})
+}
+
+func assertCheckInTicketUnchanged(t *testing.T, ticketID int64) {
+	t.Helper()
+	pool := requireIntegrationDB(t)
+	var status string
+	var validationCount int
+	var checkedAt *time.Time
+	var checkedBy *int64
+	if err := pool.QueryRow(context.Background(), `
+ SELECT status, validation_count, checked_in_at, checked_in_by
+ FROM ticketing.tickets WHERE id = $1`, ticketID).Scan(&status, &validationCount, &checkedAt, &checkedBy); err != nil {
+		t.Fatalf("read rejected ticket: %v", err)
+	}
+	if status != "sold" || validationCount != 0 || checkedAt != nil || checkedBy != nil {
+		t.Fatalf("rejected check-in mutated ticket: status=%s count=%d checked_at=%v checked_by=%v", status, validationCount, checkedAt, checkedBy)
+	}
 }

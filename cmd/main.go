@@ -49,6 +49,9 @@ func main() {
 	ticketRepo := postgres.NewTicketRepository(database.Pool)
 	ticketTypeRepo := postgres.NewTicketTypeRepository(database.Pool)
 	organizerRepo := postgres.NewOrganizerRepository(database.Pool)
+	eventStaffRepo := postgres.NewEventStaffRepository(
+		database.Pool,
+	)
 	venueRepo := postgres.NewVenueRepository(database.Pool)
 	orderRepo := postgres.NewOrderRepository(database.Pool)
 	paymentRepo := postgres.NewPaymentRepository(database.Pool)
@@ -93,6 +96,16 @@ func main() {
 		customerRepo,
 		nil,
 		ticketCredentialService,
+	)
+	checkInAuthorizationService := services.NewCheckInAuthorizationService(
+		userRepo,
+		eventRepo,
+		organizerRepo,
+		eventStaffRepo,
+	)
+
+	ticketService.SetCheckInAuthorization(
+		checkInAuthorizationService,
 	)
 	ticketTypeService := services.NewTicketTypeService(ticketTypeRepo, eventRepo)
 	eventService := services.NewEventService(

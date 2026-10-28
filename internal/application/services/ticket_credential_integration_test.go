@@ -42,7 +42,7 @@ func TestVerifyTicketCredentialIntegration(t *testing.T) {
 	service := NewTicketService(
 		ticketRepo,
 		nil,
-		nil,
+		postgres.NewEventRepository(pool),
 		nil,
 		nil,
 		credentialService,
@@ -97,6 +97,7 @@ func TestVerifyTicketCredentialIntegration(t *testing.T) {
 	// --------------------------------------------------------
 
 	var eventID int64
+	var eventPublicID string
 
 	err = pool.QueryRow(
 		ctx,
@@ -115,12 +116,12 @@ func TestVerifyTicketCredentialIntegration(t *testing.T) {
 			NOW() + INTERVAL '1 day',
 			NOW() + INTERVAL '1 day 2 hours'
 		)
-		RETURNING id
-		`,
+		RETURNING id, public_uuid::text
+`,
 		organizerID,
 		eventSlug,
 		"Credential Integration Event",
-	).Scan(&eventID)
+	).Scan(&eventID, &eventPublicID)
 	if err != nil {
 		t.Fatalf(
 			"create event fixture: %v",
@@ -515,6 +516,8 @@ func TestVerifyTicketCredentialIntegration(t *testing.T) {
 	// SNAPSHOT BEFORE VALIDATION
 	// ========================================================
 
+	service.SetCheckInAuthorization(&boundaryAuthorizerStub{principal: &CheckInPrincipal{UserID: 42, UserPublicID: "validation-test-user", AccessRole: "checkin_staff"}})
+
 	var beforeStatus string
 	var beforeCheckedInAt *time.Time
 	var beforeLastValidatedAt *time.Time
@@ -555,6 +558,7 @@ func TestVerifyTicketCredentialIntegration(t *testing.T) {
 	soldResult, err := service.VerifyTicketCredential(
 		ctx,
 		soldCredential,
+		eventPublicID,
 	)
 	if err != nil {
 		t.Fatalf(
@@ -597,6 +601,7 @@ func TestVerifyTicketCredentialIntegration(t *testing.T) {
 	checkedResult, err := service.VerifyTicketCredential(
 		ctx,
 		checkedCredential,
+		eventPublicID,
 	)
 	if err != nil {
 		t.Fatalf(
@@ -643,6 +648,7 @@ func TestVerifyTicketCredentialIntegration(t *testing.T) {
 	reservedResult, err := service.VerifyTicketCredential(
 		ctx,
 		reservedCredential,
+		eventPublicID,
 	)
 	if err != nil {
 		t.Fatalf(
@@ -667,6 +673,7 @@ func TestVerifyTicketCredentialIntegration(t *testing.T) {
 	refundedResult, err := service.VerifyTicketCredential(
 		ctx,
 		refundedCredential,
+		eventPublicID,
 	)
 	if err != nil {
 		t.Fatalf(
@@ -691,6 +698,7 @@ func TestVerifyTicketCredentialIntegration(t *testing.T) {
 	cancelledResult, err := service.VerifyTicketCredential(
 		ctx,
 		cancelledCredential,
+		eventPublicID,
 	)
 	if err != nil {
 		t.Fatalf(
@@ -740,6 +748,7 @@ func TestVerifyTicketCredentialIntegration(t *testing.T) {
 	_, err = service.VerifyTicketCredential(
 		ctx,
 		tamperedCredential,
+		eventPublicID,
 	)
 
 	if !errors.Is(
@@ -771,6 +780,7 @@ func TestVerifyTicketCredentialIntegration(t *testing.T) {
 	_, err = service.VerifyTicketCredential(
 		ctx,
 		missingCredential,
+		eventPublicID,
 	)
 
 	if !errors.Is(
