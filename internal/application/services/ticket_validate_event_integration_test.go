@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	ticketdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/ticket"
 )
 
 func TestValidateEventIntegration(t *testing.T) {
@@ -47,5 +49,35 @@ func TestValidateEventIntegration(t *testing.T) {
 	}
 	if snapshot(a.TicketID) != beforeA || snapshot(b.TicketID) != beforeB {
 		t.Fatal("Validate modified ticket rows")
+	}
+
+	// Validation must leave the ticket usable by the existing atomic check-in.
+	ctx := checkInAuthorizedContext(a)
+	req := &ticketdto.CheckInTicketRequest{Credential: a.Credential, EventID: a.EventPublicID, Method: "qr_code"}
+	checked, err := svc.CheckInTicket(ctx, req)
+	if err != nil || checked == nil || !checked.Accepted {
+		t.Fatalf("check-in after validation: result=%v err=%v", checked, err)
+	}
+	var actor int64
+	var count int
+	var state string
+	var checkedAt *time.Time
+	if err := pool.QueryRow(ctx, `SELECT checked_in_by, validation_count, status, checked_in_at FROM ticketing.tickets WHERE id=$1`, a.TicketID).Scan(&actor, &count, &state, &checkedAt); err != nil {
+		t.Fatal(err)
+	}
+	if actor != a.UserID || count != 1 || state != "checked_in" || checkedAt == nil {
+		t.Fatalf("unexpected check-in record: actor=%d count=%d status=%s checked_at=%v", actor, count, state, checkedAt)
+	}
+	afterCheckIn := snapshot(a.TicketID)
+	used, err := svc.VerifyTicketCredential(ctx, a.Credential, a.EventPublicID)
+	if err != nil || used == nil || !used.Authentic || used.CanCheckIn || used.Result != "ALREADY_CHECKED_IN" {
+		t.Fatalf("validate consumed ticket: result=%v err=%v", used, err)
+	}
+	second, err := svc.CheckInTicket(ctx, req)
+	if err != nil || second == nil || second.Accepted || second.Result != "ALREADY_CHECKED_IN" {
+		t.Fatalf("second check-in: result=%v err=%v", second, err)
+	}
+	if snapshot(a.TicketID) != afterCheckIn || snapshot(b.TicketID) != beforeB {
+		t.Fatal("validation or repeated check-in changed persisted ticket rows")
 	}
 }
