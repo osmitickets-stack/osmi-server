@@ -41,7 +41,7 @@ Se reutiliza el servicio y las fixtures existentes, que verifican la marca de ai
 | 3 | Concurrencia real | Aprobado según traspaso; se conserva |
 | 4 | Proteger Validate por evento | Validado en PostgreSQL aislado; prueba de regresión en commit `2be0525`; push pendiente |
 | 5 | Seguridad Gateway → Server | Validado localmente con mTLS, regresiones y compilaciones; push pendiente |
-| 6 | Scanner web de OSMI | E2E manual aprobado; cámara y validación final del frontend pendientes |
+| 6 | Scanner web de OSMI | E2E manual y cámara aprobados; compilación final del frontend aprobada; push pendiente |
 | 7 | E2E integral y regresiones | Pendiente |
 
 ## Avance verificado el 29 de octubre de 2026
@@ -72,4 +72,6 @@ Se reutiliza el servicio y las fixtures existentes, que verifican la marca de ai
 - Con la credencial firmada completa, Validate mostró boleto válido y el botón Confirmar. La consulta posterior mantuvo `sold|0|f`: Validate no consumió el boleto.
 - Un solo clic en Confirmar mostró “Acceso registrado”. PostgreSQL devolvió `checked_in|1|t|t`: estado, contador, hora de check-in y actor ficticio correctos.
 - Al volver a validar el mismo QR, la interfaz mostró boleto ya utilizado, no ofreció Confirmar y PostgreSQL conservó `checked_in|1|t|t`.
-- Falta prueba de cámara con un QR visual, compilación final del frontend tras el ajuste del dashboard y regresión integral del pendiente 7. No se ha hecho push ni se ha tocado EC2.
+- El usuario generó una imagen QR local del boleto ficticio ya usado con `cmd/seed-checkin-demo`, sin subirla a servicios externos. La cámara del escáner la leyó; mostró boleto ya utilizado y no ofreció Confirmar.
+- El usuario ejecutó `npm.cmd run build` tras el último ajuste del dashboard y confirmó que terminó correctamente. TypeScript y ESLint de los archivos del escáner y dashboard también terminaron con código 0; persiste una advertencia previa por una función sin uso en el dashboard.
+- Falta la regresión integral del pendiente 7 y comprobar que los pushes de ramas de trabajo no disparen despliegues externos. No se ha hecho push ni se ha tocado EC2.
