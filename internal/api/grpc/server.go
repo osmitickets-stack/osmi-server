@@ -9,8 +9,6 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 
 	pb "github.com/osmitickets-stack/osmi-protobuf/gen/pb"
@@ -40,18 +38,20 @@ func NewServer(
 }
 
 func (s *Server) StartGRPC() error {
+	secureServer, err := NewSecureServer(s.config)
+	if err != nil {
+		return fmt.Errorf("gRPC security configuration: %w", err)
+	}
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", s.config.GRPCPort))
 	if err != nil {
+		secureServer.Stop()
 		return fmt.Errorf("failed to listen on gRPC port: %w", err)
 	}
 
-	s.grpcServer = grpc.NewServer()
+	s.grpcServer = secureServer
 
 	// Registrar servicios
 	pb.RegisterOsmiServiceServer(s.grpcServer, s.grpcHandler)
-
-	// Para desarrollo/testing
-	reflection.Register(s.grpcServer)
 
 	s.logger.Info("🚀 gRPC server starting",
 		zap.String("address", lis.Addr().String()),
@@ -68,48 +68,7 @@ func (s *Server) StartGRPC() error {
 }
 
 func (s *Server) StartHTTPGateway() error {
-	ctx := context.Background()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// Crear mux para gRPC-Gateway
-	mux := runtime.NewServeMux(
-		runtime.WithErrorHandler(s.customErrorHandler),
-		runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.JSONPb{}),
-	)
-
-	// Registrar handlers HTTP
-	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-
-	err := pb.RegisterOsmiServiceHandlerFromEndpoint(
-		ctx,
-		mux,
-		fmt.Sprintf(":%s", s.config.GRPCPort),
-		opts,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to register gateway: %w", err)
-	}
-
-	// Configurar router HTTP con middleware
-	router := s.setupRouter(mux)
-
-	s.httpServer = &http.Server{
-		Addr:    ":8080", // cámbialo cuando agregues HTTPPort al Config
-		Handler: router,
-	}
-
-	s.logger.Info("🌐 HTTP Gateway starting",
-		zap.String("address", s.httpServer.Addr),
-	)
-
-	go func() {
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.logger.Fatal("HTTP gateway failed", zap.Error(err))
-		}
-	}()
-
-	return nil
+	return fmt.Errorf("embedded HTTP gateway is disabled; use osmi-gateway with mutual TLS")
 }
 
 func (s *Server) setupRouter(gwMux *runtime.ServeMux) http.Handler {
