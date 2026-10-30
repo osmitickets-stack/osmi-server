@@ -49,10 +49,8 @@ func (h *UserHandler) CreateUser(ctx context.Context, req *osmi.CreateUserReques
 		Username: req.Name,
 		Email:    req.Email,
 		Password: req.Password,
-		Role:     req.Role,
-	}
-	if createReq.Role == "" {
-		createReq.Role = "customer"
+		// Public registration cannot assign staff or administrator privileges.
+		Role: "customer",
 	}
 
 	user, err := h.userService.Register(ctx, createReq)
