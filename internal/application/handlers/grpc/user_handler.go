@@ -169,6 +169,7 @@ func (h *UserHandler) Login(ctx context.Context, req *osmi.LoginRequest) (*osmi.
 	expiresAt := time.Now().Add(24 * time.Hour)
 	claims := jwt.MapClaims{
 		"user_id":      user.PublicID,
+		"token_type":   "access",
 		"email":        user.Email,
 		"role":         user.Role,
 		"is_staff":     user.IsStaff,
