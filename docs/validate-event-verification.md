@@ -40,9 +40,9 @@ Se reutiliza el servicio y las fixtures existentes, que verifican la marca de ai
 | 2 | Autorización real de staff y checked_in_by | Aprobado según traspaso; se conserva |
 | 3 | Concurrencia real | Aprobado según traspaso; se conserva |
 | 4 | Proteger Validate por evento | Validado en PostgreSQL aislado; prueba de regresión en commit `2be0525`; push pendiente |
-| 5 | Seguridad Gateway → Server | Validado localmente con mTLS, regresiones y compilaciones; push pendiente |
+| 5 | Seguridad Gateway → Server | mTLS, identidad, rutas públicas y distinción access/refresh validados localmente; commits locales, push pendiente |
 | 6 | Scanner web de OSMI | E2E manual y cámara aprobados; compilación final del frontend aprobada; push pendiente |
-| 7 | E2E integral y regresiones | Pendiente |
+| 7 | E2E integral y regresiones | E2E aislado de venta a segundo rechazo aprobado; falta comprobar compilación independiente con protobuf publicado y push |
 
 ## Avance verificado el 29 de octubre de 2026
 
@@ -74,4 +74,8 @@ Se reutiliza el servicio y las fixtures existentes, que verifican la marca de ai
 - Al volver a validar el mismo QR, la interfaz mostró boleto ya utilizado, no ofreció Confirmar y PostgreSQL conservó `checked_in|1|t|t`.
 - El usuario generó una imagen QR local del boleto ficticio ya usado con `cmd/seed-checkin-demo`, sin subirla a servicios externos. La cámara del escáner la leyó; mostró boleto ya utilizado y no ofreció Confirmar.
 - El usuario ejecutó `npm.cmd run build` tras el último ajuste del dashboard y confirmó que terminó correctamente. TypeScript y ESLint de los archivos del escáner y dashboard también terminaron con código 0; persiste una advertencia previa por una función sin uso en el dashboard.
-- Falta la regresión integral del pendiente 7 y comprobar que los pushes de ramas de trabajo no disparen despliegues externos. No se ha hecho push ni se ha tocado EC2.
+- El usuario ejecutó `TestPaidOrderToCheckInIntegration` contra PostgreSQL aislado: PASS. Recorre una orden pagada ficticia por `ProcessPaidOrder`, mantiene la credencial firmada, valida sin consumo, registra un check-in y rechaza el segundo.
+- El usuario confirmó `go test -count=1 -timeout 120s ./internal/middleware ./internal/server` en Gateway: ambos paquetes PASS, incluidos los nuevos casos de access, refresh y refresh legado.
+- Se revisaron los workflows: Docker Build & Publish de Server y Gateway responde a push únicamente en `main`; CI también escucha push/PR a `main`; Deploy se activa por completion del workflow Docker exitoso o por ejecución manual. Protobuf y Front no tienen `.github/workflows`. El usuario confirmó que los cuatro repositorios muestran lista vacía de webhooks.
+- Un push de rama de trabajo no activa esos workflows de GitHub Actions. Se intentó publicar la rama Protobuf dos veces, pero el entorno no resolvió GitHub (`getaddrinfo() thread failed to start`). No se elevó el acceso de red; los pushes quedan pendientes por esa limitación, no por despliegue.
+- Server y Gateway todavía declaran protobuf `v1.0.8`; `go.work` permite la compilación local conjunta, pero no se ha verificado aún la compilación independiente tras publicar el contrato actualizado.
