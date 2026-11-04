@@ -24,7 +24,11 @@ func requireIntegrationDB(t *testing.T) *pgxpool.Pool {
 
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
-		t.Fatalf("parse OSMI_TEST_DATABASE_URL: %v", err)
+		t.Fatal("REFUSING integration tests: invalid test database URL")
+	}
+	if config.ConnConfig.Host != "127.0.0.1" || config.ConnConfig.Port != 55439 ||
+		config.ConnConfig.Database != "osmidb_test" || config.ConnConfig.User != "osmi" {
+		t.Fatal("REFUSING integration tests: expected isolated PostgreSQL at 127.0.0.1:55439 as osmi/osmidb_test")
 	}
 
 	// Necesitaremos varias conexiones reales para las pruebas
@@ -43,19 +47,23 @@ func requireIntegrationDB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("ping integration database: %v", err)
 	}
 
-	var databaseName string
+	var databaseName, databaseUser, marker string
+	var markerCount, migrationVersion int
+	var migrationDirty bool
 	if err := pool.QueryRow(
 		ctx,
-		`SELECT current_database()`,
-	).Scan(&databaseName); err != nil {
-		t.Fatalf("verify integration database: %v", err)
+		`SELECT current_database(), current_user,
+			(SELECT count(*) FROM public.osmi_checkin_test_guard),
+			(SELECT marker FROM public.osmi_checkin_test_guard LIMIT 1),
+			(SELECT version FROM public.schema_migrations LIMIT 1),
+			(SELECT dirty FROM public.schema_migrations LIMIT 1)`,
+	).Scan(&databaseName, &databaseUser, &markerCount, &marker, &migrationVersion, &migrationDirty); err != nil {
+		t.Fatal("REFUSING integration tests: isolated database guard unavailable")
 	}
 
-	if databaseName != "osmidb_test" {
-		t.Fatalf(
-			"REFUSING TO RUN INTEGRATION TESTS: expected database osmidb_test, got %q",
-			databaseName,
-		)
+	if databaseName != "osmidb_test" || databaseUser != "osmi" ||
+		markerCount != 1 || marker != "osmi-checkin-isolated-v1" || migrationVersion != 13 || migrationDirty {
+		t.Fatal("REFUSING integration tests: database identity or schema guard mismatch")
 	}
 
 	return pool

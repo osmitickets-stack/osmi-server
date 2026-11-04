@@ -22,13 +22,15 @@ func NewJWTService(secretKey string) *JWTService {
 }
 
 type Claims struct {
-	UserID string `json:"user_id"`
+	UserID    string `json:"user_id"`
+	TokenType string `json:"token_type,omitempty"`
 	jwt.RegisteredClaims
 }
 
 func (s *JWTService) GenerateAccessToken(userID string) (string, error) {
 	claims := &Claims{
-		UserID: userID,
+		UserID:    userID,
+		TokenType: "access",
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.accessExpiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -40,7 +42,8 @@ func (s *JWTService) GenerateAccessToken(userID string) (string, error) {
 
 func (s *JWTService) GenerateRefreshToken(userID string) (string, error) {
 	claims := &Claims{
-		UserID: userID,
+		UserID:    userID,
+		TokenType: "refresh",
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.refreshExpiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

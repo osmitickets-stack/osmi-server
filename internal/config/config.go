@@ -1,18 +1,21 @@
 package config
 
 import (
+	"github.com/osmitickets-stack/osmi-server/internal/transportsecurity"
 	"os"
 	"time"
 )
 
 type Config struct {
-	Database DatabaseConfig
-	Server   ServerConfig
-	JWT      JWTConfig
-	Redis    RedisConfig
-	Stripe   StripeConfig
-	TicketQR TicketQRConfig
-	GRPCPort string
+	Database       DatabaseConfig
+	Server         ServerConfig
+	JWT            JWTConfig
+	Redis          RedisConfig
+	Stripe         StripeConfig
+	TicketQR       TicketQRConfig
+	GRPCPort       string
+	GRPCTLS        transportsecurity.Config
+	GRPCReflection bool
 }
 
 type TicketQRConfig struct {
@@ -54,6 +57,13 @@ type RedisConfig struct {
 func Load() *Config {
 	return &Config{
 		GRPCPort: getEnv("GRPC_PORT", "50051"),
+		GRPCTLS: transportsecurity.Config{
+			CAFile:         getEnv("GRPC_TLS_CA_FILE", ""),
+			CertFile:       getEnv("GRPC_TLS_CERT_FILE", ""),
+			KeyFile:        getEnv("GRPC_TLS_KEY_FILE", ""),
+			GatewayDNSName: getEnv("GRPC_TLS_GATEWAY_DNS_NAME", "osmi-gateway"),
+		},
+		GRPCReflection: getEnv("GRPC_ENABLE_REFLECTION", "false") == "true",
 		Database: DatabaseConfig{
 			URL:             getEnv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/osmi"),
 			MaxOpenConns:    getEnvAsInt("DB_MAX_OPEN_CONNS", 25),

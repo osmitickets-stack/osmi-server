@@ -12,7 +12,7 @@ import (
 
 	"github.com/joho/godotenv"
 	pb "github.com/osmitickets-stack/osmi-protobuf/gen/pb"
-	"github.com/osmitickets-stack/osmi-server/internal/api/grpc/interceptors"
+	apigrpc "github.com/osmitickets-stack/osmi-server/internal/api/grpc"
 	handlersgrpc "github.com/osmitickets-stack/osmi-server/internal/application/handlers/grpc"
 	"github.com/osmitickets-stack/osmi-server/internal/application/services"
 	"github.com/osmitickets-stack/osmi-server/internal/config"
@@ -23,7 +23,6 @@ import (
 	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/repositories/postgres"
 	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
 )
 
 func main() {
@@ -32,6 +31,11 @@ func main() {
 
 	_ = godotenv.Load()
 	cfg := config.Load()
+	grpcServer, err := apigrpc.NewSecureServer(cfg)
+	if err != nil {
+		log.Fatalf("gRPC security configuration: %v", err)
+	}
+	defer grpcServer.Stop()
 
 	if err := database.Init(); err != nil {
 		log.Fatalf("❌ Failed to initialize database pool: %v", err)
@@ -178,17 +182,13 @@ func main() {
 	log.Println("✅ Handler unificado creado")
 
 	// Iniciar servidor gRPC
-	startServer(handler, cfg.GRPCPort)
+	startServer(handler, cfg.GRPCPort, grpcServer)
 }
 
-func startServer(handler *handlersgrpc.Handler, port string) {
+func startServer(handler *handlersgrpc.Handler, port string, server *grpc.Server) {
 	address := ":" + port
-	server := grpc.NewServer(
-		grpc.UnaryInterceptor(interceptors.AuthUnaryInterceptor),
-	)
 
 	pb.RegisterOsmiServiceServer(server, handler)
-	reflection.Register(server)
 
 	go func() {
 		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

@@ -49,10 +49,8 @@ func (h *UserHandler) CreateUser(ctx context.Context, req *osmi.CreateUserReques
 		Username: req.Name,
 		Email:    req.Email,
 		Password: req.Password,
-		Role:     req.Role,
-	}
-	if createReq.Role == "" {
-		createReq.Role = "customer"
+		// Public registration cannot assign staff or administrator privileges.
+		Role: "customer",
 	}
 
 	user, err := h.userService.Register(ctx, createReq)
@@ -171,6 +169,7 @@ func (h *UserHandler) Login(ctx context.Context, req *osmi.LoginRequest) (*osmi.
 	expiresAt := time.Now().Add(24 * time.Hour)
 	claims := jwt.MapClaims{
 		"user_id":      user.PublicID,
+		"token_type":   "access",
 		"email":        user.Email,
 		"role":         user.Role,
 		"is_staff":     user.IsStaff,
