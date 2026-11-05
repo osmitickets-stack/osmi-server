@@ -148,6 +148,7 @@ func main() {
 		stripeClient,
 		cfg.Stripe.WebhookSecret,
 		emailClient,
+		ticketCredentialService,
 	)
 
 	// ================================================

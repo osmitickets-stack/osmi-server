@@ -17,19 +17,21 @@ import (
 	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/email"
 	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/payment"
 	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/qr"
+	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
 	"github.com/stripe/stripe-go/v83"
 	"github.com/stripe/stripe-go/v83/webhook"
 )
 
 type PaymentService struct {
-	paymentRepo    repository.PaymentRepository
-	orderRepo      repository.OrderRepository
-	ticketRepo     repository.TicketRepository
-	ticketTypeRepo repository.TicketTypeRepository
-	eventRepo      repository.EventRepository
-	stripeClient   *payment.StripeClient
-	webhookSecret  string
-	emailClient    *email.SESClient
+	paymentRepo      repository.PaymentRepository
+	orderRepo        repository.OrderRepository
+	ticketRepo       repository.TicketRepository
+	ticketTypeRepo   repository.TicketTypeRepository
+	eventRepo        repository.EventRepository
+	stripeClient     *payment.StripeClient
+	webhookSecret    string
+	emailClient      *email.SESClient
+	ticketCredential *security.TicketCredentialService
 }
 
 type OrderConfirmationItem struct {
@@ -142,8 +144,9 @@ func NewPaymentService(
 	stripeClient *payment.StripeClient,
 	webhookSecret string,
 	emailClient *email.SESClient,
+	ticketCredential ...*security.TicketCredentialService,
 ) *PaymentService {
-	return &PaymentService{
+	service := &PaymentService{
 		paymentRepo:    paymentRepo,
 		orderRepo:      orderRepo,
 		ticketRepo:     ticketRepo,
@@ -153,6 +156,10 @@ func NewPaymentService(
 		webhookSecret:  webhookSecret,
 		emailClient:    emailClient,
 	}
+	if len(ticketCredential) > 0 {
+		service.ticketCredential = ticketCredential[0]
+	}
+	return service
 }
 
 func strPtr(s string) *string {
@@ -626,8 +633,23 @@ func (s *PaymentService) ProcessPaidOrder(
 	// ========================================================
 
 	now := time.Now()
+	if s.ticketCredential == nil {
+		return fmt.Errorf("cannot fulfill order %s without a ticket credential signer", order.PublicID)
+	}
 
 	for _, ticket := range orderTickets {
+		if ticket.QRCodeData == nil || strings.TrimSpace(*ticket.QRCodeData) == "" {
+			credential, err := s.ticketCredential.Sign(ticket.PublicID)
+			if err != nil {
+				return fmt.Errorf("failed to sign ticket %s: %w", ticket.PublicID, err)
+			}
+			ticket.QRCodeData = &credential
+		} else {
+			publicID, err := s.ticketCredential.Verify(*ticket.QRCodeData)
+			if err != nil || publicID != ticket.PublicID {
+				return fmt.Errorf("ticket %s has an invalid signed credential", ticket.PublicID)
+			}
+		}
 		ticket.Status = "sold"
 		ticket.SoldAt = &now
 		ticket.ReservedAt = nil
