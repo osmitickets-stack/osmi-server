@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	postgres "github.com/osmitickets-stack/osmi-server/internal/infrastructure/repositories/postgres"
+	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
 )
 
 func requireIntegrationDB(t *testing.T) *pgxpool.Pool {
@@ -102,6 +103,10 @@ func TestProcessPaidOrderConcurrentIsIdempotent(t *testing.T) {
 	orderRepo := postgres.NewOrderRepository(pool)
 	ticketRepo := postgres.NewTicketRepository(pool)
 	ticketTypeRepo := postgres.NewTicketTypeRepository(pool)
+	signer, signerErr := security.NewTicketCredentialService("test-k1", []byte("0123456789abcdef0123456789abcdef"))
+	if signerErr != nil {
+		t.Fatal(signerErr)
+	}
 
 	service := NewPaymentService(
 		paymentRepo,
@@ -112,6 +117,7 @@ func TestProcessPaidOrderConcurrentIsIdempotent(t *testing.T) {
 		nil, // stripeClient: no se usa en ProcessPaidOrder
 		"",  // webhookSecret
 		nil, // emailClient: evitamos enviar email real
+		signer,
 	)
 
 	// ========================================================

@@ -12,6 +12,18 @@ import (
 // The payment provider is intentionally absent: a fictitious paid order is
 // fulfilled by the production service, then its signed ticket is scanned.
 func TestPaidOrderToCheckInIntegration(t *testing.T) {
+	testPaidOrderToCheckIn(t, false, false)
+}
+
+func TestPaidOrderLegacyReservationToCheckInIntegration(t *testing.T) {
+	testPaidOrderToCheckIn(t, true, false)
+}
+
+func TestPaidOrderLegacyReservationRequiresSignerIntegration(t *testing.T) {
+	testPaidOrderToCheckIn(t, true, true)
+}
+
+func testPaidOrderToCheckIn(t *testing.T, legacyReservation, omitSigner bool) {
 	checkIn, signer := newCheckInTestService(t)
 	fixture := createCheckInFixture(t, signer, "reserved", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	pool := requireIntegrationDB(t)
@@ -55,19 +67,42 @@ func TestPaidOrderToCheckInIntegration(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `
 		UPDATE ticketing.tickets
-		SET order_id=$1, reserved_at=NOW(), reservation_expires_at=NOW()+INTERVAL '15 minutes'
+		SET order_id=$1, reserved_at=NOW(), reservation_expires_at=NOW()+INTERVAL '15 minutes',
+			qr_code_data=CASE WHEN $3 THEN NULL ELSE qr_code_data END
 		WHERE id=$2
-	`, orderID, fixture.TicketID); err != nil {
+	`, orderID, fixture.TicketID, legacyReservation); err != nil {
 		t.Fatal(err)
 	}
 
+	paymentSigner := signer
+	if omitSigner {
+		paymentSigner = nil
+	}
 	payment := NewPaymentService(
 		postgres.NewPaymentRepository(pool),
 		postgres.NewOrderRepository(pool),
 		postgres.NewTicketRepository(pool),
 		postgres.NewTicketTypeRepository(pool),
-		nil, nil, "", nil,
+		nil, nil, "", nil, paymentSigner,
 	)
+	if omitSigner {
+		if err := payment.ProcessPaidOrder(ctx, orderPublicID); err == nil {
+			t.Fatal("legacy reservation was sold without a signer")
+		}
+		var orderStatus, ticketStatus string
+		var missingQR bool
+		if err := pool.QueryRow(ctx, `
+			SELECT o.status::text, t.status, t.qr_code_data IS NULL
+			FROM billing.orders o JOIN ticketing.tickets t ON t.order_id=o.id
+			WHERE o.id=$1
+		`, orderID).Scan(&orderStatus, &ticketStatus, &missingQR); err != nil {
+			t.Fatal(err)
+		}
+		if orderStatus != "pending" || ticketStatus != "reserved" || !missingQR {
+			t.Fatal("failed fulfillment changed the order or legacy reservation")
+		}
+		return
+	}
 	if err := payment.ProcessPaidOrder(ctx, orderPublicID); err != nil {
 		t.Fatalf("fulfill fictitious paid order: %v", err)
 	}

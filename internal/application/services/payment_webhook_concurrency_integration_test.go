@@ -11,6 +11,7 @@ import (
 	"time"
 
 	postgres "github.com/osmitickets-stack/osmi-server/internal/infrastructure/repositories/postgres"
+	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
 )
 
 func testStripeSignature(payload []byte, secret string, timestamp int64) string {
@@ -38,6 +39,10 @@ func TestHandleWebhookConcurrentSameEventIsIdempotent(t *testing.T) {
 	ticketTypeRepo := postgres.NewTicketTypeRepository(pool)
 
 	const webhookSecret = "whsec_integration_test_only"
+	signer, signerErr := security.NewTicketCredentialService("test-k1", []byte("0123456789abcdef0123456789abcdef"))
+	if signerErr != nil {
+		t.Fatal(signerErr)
+	}
 
 	service := NewPaymentService(
 		paymentRepo,
@@ -48,6 +53,7 @@ func TestHandleWebhookConcurrentSameEventIsIdempotent(t *testing.T) {
 		nil,
 		webhookSecret,
 		nil,
+		signer,
 	)
 
 	suffix := time.Now().UnixNano()
