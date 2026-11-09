@@ -22,6 +22,10 @@ RUN CGO_ENABLED=0 \
     -o server \
     ./cmd/main.go
 
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath -ldflags="-s -w" \
+    -o reissue-legacy-qr ./cmd/reissue-legacy-qr
+
 # ==========================
 # Runtime
 # ==========================
@@ -37,6 +41,7 @@ RUN addgroup -S osmi && adduser -S osmi -G osmi
 WORKDIR /app
 
 COPY --from=builder /app/server .
+COPY --from=builder /app/reissue-legacy-qr .
 
 USER osmi
 
