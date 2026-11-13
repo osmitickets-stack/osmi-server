@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -72,7 +73,13 @@ func (s *OrderService) CreateOrder(
 	var tickets []*entities.Ticket
 	var orderItems []*entities.OrderItem
 
-	for _, item := range req.Items {
+	// Every checkout acquires inventory locks in the same order. Two buyers
+	// selecting the same types in reverse UI order must not deadlock.
+	items := append([]orderdto.CreateOrderItemRequest(nil), req.Items...)
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].TicketTypeID < items[j].TicketTypeID
+	})
+	for _, item := range items {
 		ticketType, err := s.ticketTypeRepo.FindByPublicID(
 			ctx,
 			item.TicketTypeID,

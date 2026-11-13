@@ -22,6 +22,18 @@ func NewPaymentRepository(db *pgxpool.Pool) *PaymentRepository {
 }
 
 func (r *PaymentRepository) Create(ctx context.Context, payment *entities.Payment) error {
+	return r.create(ctx, r.db, payment)
+}
+
+func (r *PaymentRepository) CreateTx(ctx context.Context, tx pgx.Tx, payment *entities.Payment) error {
+	return r.create(ctx, tx, payment)
+}
+
+type paymentCreator interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func (r *PaymentRepository) create(ctx context.Context, db paymentCreator, payment *entities.Payment) error {
 	query := `
 		INSERT INTO billing.payments (
 			order_id, provider_id, provider_transaction_id,
@@ -34,7 +46,7 @@ func (r *PaymentRepository) Create(ctx context.Context, payment *entities.Paymen
 		RETURNING id, created_at, updated_at
 	`
 
-	err := r.db.QueryRow(ctx, query,
+	err := db.QueryRow(ctx, query,
 		payment.OrderID, payment.ProviderID, payment.ProviderTransactionID,
 		payment.Amount, payment.Currency, payment.ExchangeRate,
 		payment.Status, payment.PaymentMethod, payment.Attempts, payment.MaxAttempts,

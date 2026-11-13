@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -1214,95 +1215,121 @@ func (r *TicketTypeRepository) ReleaseReservationTx(ctx context.Context, tx pgx.
 
 // ReleaseExpiredReservations en ticket_type_repository.go
 func (r *TicketTypeRepository) ReleaseExpiredReservations(ctx context.Context) (int64, error) {
-	// 1. Marcar expirados
-	updateTicketsQuery := `
-        UPDATE ticketing.tickets 
-        SET status = 'expired', 
-            reservation_expires_at = NULL,
-            updated_at = NOW()
-        WHERE status = 'reserved' 
-          AND reservation_expires_at < NOW()
-    `
-	result, err := r.db.Exec(ctx, updateTicketsQuery)
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return 0, r.handleError(err, "failed to update expired tickets")
+		return 0, r.handleError(err, "failed to begin expiry transaction")
 	}
-	expiredCount := result.RowsAffected()
-
-	if expiredCount > 0 {
-		// 2. Recalcular contadores
-		recalcQuery := `
-            UPDATE ticketing.ticket_types tt
-            SET 
-                reserved_quantity = COALESCE(r.real_reserved, 0),
-                sold_quantity = COALESCE(r.real_sold, 0)
-            FROM (
-                SELECT 
-                    ticket_type_id,
-                    COUNT(*) FILTER (WHERE status = 'reserved') AS real_reserved,
-                    COUNT(*) FILTER (WHERE status IN ('sold', 'checked_in')) AS real_sold
-                FROM ticketing.tickets
-                GROUP BY ticket_type_id
-            ) r
-            WHERE tt.id = r.ticket_type_id
-        `
-		_, err = r.db.Exec(ctx, recalcQuery)
-		if err != nil {
-			return expiredCount, r.handleError(err, "failed to recalc counters")
-		}
+	defer tx.Rollback(ctx)
+	count, err := r.ReleaseExpiredReservationsTx(ctx, tx)
+	if err != nil {
+		return 0, err
 	}
-
-	return expiredCount, nil
+	if err := tx.Commit(ctx); err != nil {
+		return 0, r.handleError(err, "failed to commit expiry transaction")
+	}
+	return count, nil
 }
 
 // ReleaseExpiredReservationsTx libera todas las reservas expiradas
 // usando la transacción existente.
 func (r *TicketTypeRepository) ReleaseExpiredReservationsTx(ctx context.Context, tx pgx.Tx) (int64, error) {
-	updateTicketsQuery := `
-		UPDATE ticketing.tickets
-		SET status = 'expired',
-			reservation_expires_at = NULL,
-			updated_at = NOW()
-		WHERE status = 'reserved'
-		  AND reservation_expires_at < NOW()
-	`
+	// Payment fulfillment locks the order before its tickets. Lock in the same
+	// order so an expiry cannot invalidate a payment that has already arrived.
+	orders, err := tx.Query(ctx, `
+		SELECT o.id FROM billing.orders o
+		WHERE EXISTS (
+			SELECT 1 FROM ticketing.tickets t
+			WHERE t.order_id = o.id AND t.status = 'reserved'
+			  AND t.reservation_expires_at < NOW()
+		)
+		  AND o.payment_status IS DISTINCT FROM 'paid'
+		  AND NOT EXISTS (
+			SELECT 1 FROM billing.payments p WHERE p.order_id = o.id
+			  AND (p.status IN ('processing', 'completed')
+			    OR (p.status = 'failed' AND p.provider_transaction_id IS NOT NULL AND p.cancelled_at IS NULL))
+		)
+		ORDER BY o.id LIMIT 500 FOR UPDATE OF o SKIP LOCKED
+	`)
+	if err != nil {
+		return 0, r.handleError(err, "failed to lock expiring orders")
+	}
+	lockedOrderIDs := make([]int64, 0, 500)
+	for orders.Next() {
+		var orderID int64
+		if err := orders.Scan(&orderID); err != nil {
+			orders.Close()
+			return 0, r.handleError(err, "failed to scan expiring order")
+		}
+		lockedOrderIDs = append(lockedOrderIDs, orderID)
+	}
+	err = orders.Err()
+	orders.Close()
+	if err != nil {
+		return 0, r.handleError(err, "failed to lock expiring orders")
+	}
 
-	result, err := tx.Exec(ctx, updateTicketsQuery)
+	rows, err := tx.Query(ctx, `
+		UPDATE ticketing.tickets t
+		SET status = 'expired', reservation_expires_at = NULL, updated_at = NOW()
+		WHERE t.status = 'reserved' AND t.reservation_expires_at < NOW()
+		  AND (t.order_id IS NULL OR t.order_id = ANY($1))
+		  AND (t.order_id IS NULL OR EXISTS (
+			SELECT 1 FROM billing.orders o WHERE o.id = t.order_id
+			  AND o.payment_status IS DISTINCT FROM 'paid'
+			  AND NOT EXISTS (
+				SELECT 1 FROM billing.payments p WHERE p.order_id = o.id
+				  AND (p.status IN ('processing', 'completed')
+				    OR (p.status = 'failed' AND p.provider_transaction_id IS NOT NULL AND p.cancelled_at IS NULL))
+			  )
+		  ))
+		RETURNING t.ticket_type_id
+	`, lockedOrderIDs)
 	if err != nil {
 		return 0, r.handleError(err, "failed to update expired tickets")
 	}
-
-	expiredCount := result.RowsAffected()
-
-	if expiredCount == 0 {
-		return 0, nil
+	counts := make(map[int64]int)
+	var expiredCount int64
+	for rows.Next() {
+		var ticketTypeID int64
+		if err := rows.Scan(&ticketTypeID); err != nil {
+			rows.Close()
+			return 0, r.handleError(err, "failed to scan expired ticket")
+		}
+		counts[ticketTypeID]++
+		expiredCount++
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return 0, r.handleError(err, "failed to expire tickets")
 	}
 
-	recalcQuery := `
-		UPDATE ticketing.ticket_types tt
-		SET
-			reserved_quantity = COALESCE(r.real_reserved, 0),
-			sold_quantity = COALESCE(r.real_sold, 0)
-		FROM (
-			SELECT
-				ticket_type_id,
-				COUNT(*) FILTER (WHERE status = 'reserved') AS real_reserved,
-				COUNT(*) FILTER (WHERE status IN ('sold', 'checked_in')) AS real_sold
-			FROM ticketing.tickets
-			GROUP BY ticket_type_id
-		) r
-		WHERE tt.id = r.ticket_type_id
-	`
-
-	if _, err := tx.Exec(ctx, recalcQuery); err != nil {
-		return expiredCount, r.handleError(err, "failed to recalc counters")
+	ids := make([]int64, 0, len(counts))
+	for id := range counts {
+		ids = append(ids, id)
 	}
-
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, id := range ids {
+		result, err := tx.Exec(ctx, `
+			UPDATE ticketing.ticket_types
+			SET reserved_quantity = reserved_quantity - $1, updated_at = NOW()
+			WHERE id = $2 AND reserved_quantity >= $1
+		`, counts[id], id)
+		if err != nil {
+			return 0, r.handleError(err, "failed to release expired inventory")
+		}
+		if result.RowsAffected() != 1 {
+			return 0, fmt.Errorf("expired inventory counter mismatch for ticket type %d", id)
+		}
+	}
 	return expiredCount, nil
 }
 
 // ReserveTicketWithLock reserva un ticket con bloqueo FOR UPDATE
 func (r *TicketTypeRepository) ReserveTicketWithLock(ctx context.Context, tx pgx.Tx, ticketTypeID int64, quantity int) error {
+	if quantity <= 0 {
+		return fmt.Errorf("ticket reservation quantity must be positive")
+	}
 	// Primero, bloquear la fila
 	var available int
 	query := `
