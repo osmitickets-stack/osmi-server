@@ -26,6 +26,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath -ldflags="-s -w" \
     -o reissue-legacy-qr ./cmd/reissue-legacy-qr
 
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath -ldflags="-s -w" \
+    -o reservation-worker ./cmd/worker
+
 # ==========================
 # Runtime
 # ==========================
@@ -42,6 +46,7 @@ WORKDIR /app
 
 COPY --from=builder /app/server .
 COPY --from=builder /app/reissue-legacy-qr .
+COPY --from=builder /app/reservation-worker .
 
 USER osmi
 

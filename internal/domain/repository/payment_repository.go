@@ -4,6 +4,8 @@ package repository
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
+
 	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
 	paymentdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/payment"
 	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
@@ -13,6 +15,7 @@ import (
 type PaymentRepository interface {
 	// CRUD básico
 	Create(ctx context.Context, payment *entities.Payment) error
+	CreateTx(ctx context.Context, tx pgx.Tx, payment *entities.Payment) error
 	FindByID(ctx context.Context, id int64) (*entities.Payment, error)
 	FindByPublicID(ctx context.Context, publicID string) (*entities.Payment, error)
 	FindByTransactionID(ctx context.Context, transactionID string) (*entities.Payment, error)

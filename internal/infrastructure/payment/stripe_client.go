@@ -1,6 +1,8 @@
 package payment
 
 import (
+	"fmt"
+
 	"github.com/stripe/stripe-go/v83"
 	"github.com/stripe/stripe-go/v83/paymentintent"
 )
@@ -21,6 +23,7 @@ func (c *StripeClient) CreatePaymentIntent(
 	amount int64,
 	currency string,
 	orderID string,
+	attempt int,
 ) (*stripe.PaymentIntent, error) {
 
 	params := &stripe.PaymentIntentParams{
@@ -37,6 +40,7 @@ func (c *StripeClient) CreatePaymentIntent(
 			"order_id": orderID,
 		},
 	}
+	params.SetIdempotencyKey(fmt.Sprintf("osmi-pi-%s-%d", orderID, attempt))
 
 	return paymentintent.New(params)
 }
@@ -45,4 +49,10 @@ func (c *StripeClient) GetPaymentIntent(
 	id string,
 ) (*stripe.PaymentIntent, error) {
 	return paymentintent.Get(id, nil)
+}
+
+func (c *StripeClient) CancelPaymentIntent(id string) (*stripe.PaymentIntent, error) {
+	return paymentintent.Cancel(id, &stripe.PaymentIntentCancelParams{
+		CancellationReason: stripe.String("abandoned"),
+	})
 }

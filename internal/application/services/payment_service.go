@@ -5,17 +5,18 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	paymentdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/payment"
 	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/email"
-	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/payment"
 	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/qr"
 	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
 	"github.com/stripe/stripe-go/v83"
@@ -28,10 +29,15 @@ type PaymentService struct {
 	ticketRepo       repository.TicketRepository
 	ticketTypeRepo   repository.TicketTypeRepository
 	eventRepo        repository.EventRepository
-	stripeClient     *payment.StripeClient
+	stripeClient     stripeIntentClient
 	webhookSecret    string
 	emailClient      *email.SESClient
 	ticketCredential *security.TicketCredentialService
+}
+
+type stripeIntentClient interface {
+	CreatePaymentIntent(amount int64, currency, orderID string, attempt int) (*stripe.PaymentIntent, error)
+	GetPaymentIntent(id string) (*stripe.PaymentIntent, error)
 }
 
 type OrderConfirmationItem struct {
@@ -141,7 +147,7 @@ func NewPaymentService(
 	ticketRepo repository.TicketRepository,
 	ticketTypeRepo repository.TicketTypeRepository,
 	eventRepo repository.EventRepository,
-	stripeClient *payment.StripeClient,
+	stripeClient stripeIntentClient,
 	webhookSecret string,
 	emailClient *email.SESClient,
 	ticketCredential ...*security.TicketCredentialService,
@@ -170,74 +176,27 @@ func (s *PaymentService) CreatePayment(
 	ctx context.Context,
 	req *paymentdto.CreatePaymentRequest,
 ) (*paymentdto.PaymentProcessingResponse, error) {
-
-	order, err := s.orderRepo.FindByPublicID(ctx, req.OrderID)
+	intent, err := s.CreatePaymentIntent(ctx, &paymentdto.CreatePaymentIntentRequest{
+		OrderID: req.OrderID, Currency: req.Currency,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("order not found: %w", err)
+		return nil, err
 	}
-
-	if order.Status != "pending" {
-		return nil, fmt.Errorf("order is not pending, current status: %s", order.Status)
-	}
-
-	providerID := int16(1)
-	now := time.Now()
-
-	paymentEntity := &entities.Payment{
-		OrderID:       order.ID,
-		ProviderID:    providerID,
-		Amount:        order.TotalAmount,
-		Currency:      req.Currency,
-		ExchangeRate:  1.0,
-		Status:        "pending",
-		PaymentMethod: &req.PaymentMethod,
-		Attempts:      0,
-		MaxAttempts:   3,
-		IPAddress:     nil,
-		UserAgent:     nil,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
-
-	if err := paymentEntity.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid payment: %w", err)
-	}
-
-	if err := s.paymentRepo.Create(ctx, paymentEntity); err != nil {
-		return nil, fmt.Errorf("failed to create payment: %w", err)
-	}
-
-	amountCents := int64(order.TotalAmount * 100)
-
-	pi, err := s.stripeClient.CreatePaymentIntent(amountCents, req.Currency, order.PublicID)
+	paymentEntity, err := s.paymentRepo.FindByTransactionID(ctx, intent.PaymentIntentID)
 	if err != nil {
-		paymentEntity.Status = "failed"
-		_ = s.paymentRepo.Update(ctx, paymentEntity)
-		return nil, fmt.Errorf("failed to create Stripe payment intent: %w", err)
+		return nil, fmt.Errorf("failed to find payment after intent creation: %w", err)
 	}
-
-	paymentEntity.ProviderTransactionID = &pi.ID
-	paymentEntity.Status = "processing"
-	paymentEntity.UpdatedAt = time.Now()
-
-	if err := s.paymentRepo.Update(ctx, paymentEntity); err != nil {
-		return nil, fmt.Errorf("failed to update payment with Stripe data: %w", err)
-	}
-
-	paymentID := fmt.Sprintf("%d", paymentEntity.ID)
-
 	return &paymentdto.PaymentProcessingResponse{
-		PaymentID:      paymentID,
+		PaymentID:      fmt.Sprintf("%d", paymentEntity.ID),
 		Status:         paymentEntity.Status,
 		RequiresAction: true,
 		ActionType:     strPtr("stripe_sdk"),
 		ProviderInstructions: map[string]interface{}{
-			"client_secret":     pi.ClientSecret,
-			"payment_intent_id": pi.ID,
+			"client_secret":     intent.ClientSecret,
+			"payment_intent_id": intent.PaymentIntentID,
 		},
 	}, nil
 }
-
 func (s *PaymentService) GetPayment(
 	ctx context.Context,
 	paymentID string,
@@ -416,7 +375,7 @@ func (s *PaymentService) HandleWebhook(
 			)
 		}
 
-	case "payment_intent.payment_failed":
+	case "payment_intent.payment_failed", "payment_intent.canceled":
 		var paymentIntent stripe.PaymentIntent
 		if err := json.Unmarshal(event.Data.Raw, &paymentIntent); err != nil {
 			return fmt.Errorf(
@@ -437,13 +396,16 @@ func (s *PaymentService) HandleWebhook(
 			)
 		}
 
-		// Un payment_intent.payment_failed retrasado no debe degradar
-		// un pago que ya llegó a completed.
-		if paymentEntity.Status != "completed" &&
+		// A failed payment attempt can be retried on the same Stripe intent.
+		// Only a canceled intent is safe to release from inventory.
+		if event.Type == "payment_intent.canceled" &&
+			paymentEntity.Status != "completed" &&
 			paymentEntity.Status != "refunded" {
 
 			paymentEntity.Status = "failed"
-			paymentEntity.UpdatedAt = time.Now()
+			now := time.Now()
+			paymentEntity.CancelledAt = &now
+			paymentEntity.UpdatedAt = now
 
 			if err := s.paymentRepo.Update(ctx, paymentEntity); err != nil {
 				return fmt.Errorf(
@@ -931,63 +893,128 @@ func (s *PaymentService) CreatePaymentIntent(
 	ctx context.Context,
 	req *paymentdto.CreatePaymentIntentRequest,
 ) (*paymentdto.CreatePaymentIntentResponse, error) {
+	if req == nil || req.OrderID == "" {
+		return nil, fmt.Errorf("order_id is required")
+	}
+	if s.stripeClient == nil {
+		return nil, fmt.Errorf("Stripe client is not configured")
+	}
+	tx, err := s.ticketRepo.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start payment transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
 
-	order, err := s.orderRepo.FindByPublicID(ctx, req.OrderID)
+	// Expiration and fulfillment acquire the order lock first. Keep it until
+	// the provider intent and local payment row are both committed.
+	order, err := s.orderRepo.FindByPublicIDForUpdate(ctx, tx, req.OrderID)
 	if err != nil {
 		return nil, fmt.Errorf("order not found: %w", err)
 	}
-
-	if order.Status != "pending" {
-		return nil, fmt.Errorf("order is not pending, current status: %s", order.Status)
+	if order.Status != "pending" || order.PaymentStatus == "paid" {
+		return nil, fmt.Errorf("order is not payable")
 	}
-
-	if order.PaymentStatus == "paid" {
-		return nil, fmt.Errorf("order already paid")
-	}
-
 	currency := req.Currency
 	if currency == "" {
 		currency = "MXN"
 	}
+	if !strings.EqualFold(currency, order.Currency) {
+		return nil, fmt.Errorf("payment currency does not match order")
+	}
 
-	amountCents := int64(order.TotalAmount * 100)
+	// A retry for the same order reuses its active intent. Concurrent
+	// requests serialize on the order lock, so they cannot create two.
+	var activeID, activeStatus string
+	err = tx.QueryRow(ctx, `
+		SELECT provider_transaction_id, status FROM billing.payments
+		WHERE order_id=$1 AND status IN ('processing','failed','completed')
+		  AND provider_transaction_id IS NOT NULL
+		ORDER BY CASE status WHEN 'completed' THEN 0 WHEN 'processing' THEN 1 ELSE 2 END, id DESC LIMIT 1
+	`, order.ID).Scan(&activeID, &activeStatus)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("failed to check active payment: %w", err)
+	}
+	if activeID != "" {
+		if activeStatus == "completed" {
+			return nil, fmt.Errorf("order payment is already completed")
+		}
+		pi, err := s.stripeClient.GetPaymentIntent(activeID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to retrieve active payment intent: %w", err)
+		}
+		if pi == nil {
+			return nil, fmt.Errorf("active payment intent is unavailable")
+		}
+		if string(pi.Status) == "canceled" {
+			if _, err := tx.Exec(ctx, `
+				UPDATE billing.payments SET status='failed', cancelled_at=NOW(), updated_at=NOW()
+				WHERE order_id=$1 AND provider_transaction_id=$2
+				  AND status IN ('processing','failed')
+			`, order.ID, activeID); err != nil {
+				return nil, fmt.Errorf("failed to mark canceled payment: %w", err)
+			}
+		} else {
+			if pi.ClientSecret == "" {
+				return nil, fmt.Errorf("active payment intent is unavailable")
+			}
+			if string(pi.Status) == "succeeded" || string(pi.Status) == "processing" {
+				return nil, fmt.Errorf("order payment is awaiting settlement")
+			}
+			if activeStatus == "failed" {
+				if _, err := tx.Exec(ctx, `UPDATE billing.payments SET status='processing', updated_at=NOW() WHERE order_id=$1 AND provider_transaction_id=$2 AND status='failed'`, order.ID, activeID); err != nil {
+					return nil, fmt.Errorf("failed to resume payment intent: %w", err)
+				}
+			}
+			return &paymentdto.CreatePaymentIntentResponse{
+				ClientSecret: pi.ClientSecret, PaymentIntentID: pi.ID,
+				Amount: pi.Amount, Currency: string(pi.Currency),
+			}, tx.Commit(ctx)
+		}
+	}
 
-	pi, err := s.stripeClient.CreatePaymentIntent(amountCents, currency, order.PublicID)
+	var total, live int
+	err = tx.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (
+			WHERE status='reserved' AND reservation_expires_at > NOW()
+		) FROM ticketing.tickets WHERE order_id=$1
+	`, order.ID).Scan(&total, &live)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create stripe payment intent: %w", err)
+		return nil, fmt.Errorf("failed to check order reservation: %w", err)
+	}
+	if total == 0 || live != total {
+		return nil, fmt.Errorf("order reservation has expired or is unavailable")
 	}
 
+	var providerID int16
+	if err := tx.QueryRow(ctx, `SELECT id FROM billing.payment_providers WHERE code='stripe' AND is_active=true`).Scan(&providerID); err != nil {
+		return nil, fmt.Errorf("active Stripe payment provider is not configured: %w", err)
+	}
+	var attempt int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE order_id=$1 AND cancelled_at IS NOT NULL`, order.ID).Scan(&attempt); err != nil {
+		return nil, fmt.Errorf("failed to count canceled payment attempts: %w", err)
+	}
+	pi, err := s.stripeClient.CreatePaymentIntent(int64(order.TotalAmount*100), currency, order.PublicID, attempt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Stripe payment intent: %w", err)
+	}
+	if pi == nil || pi.ID == "" || pi.ClientSecret == "" {
+		return nil, fmt.Errorf("Stripe returned an incomplete payment intent")
+	}
 	now := time.Now()
-
 	paymentEntity := &entities.Payment{
-		OrderID:               order.ID,
-		ProviderID:            1,
-		ProviderTransactionID: &pi.ID,
-		Amount:                order.TotalAmount,
-		Currency:              currency,
-		ExchangeRate:          1.0,
-		Status:                "processing",
-		PaymentMethod:         strPtr("card"),
-		Attempts:              0,
-		MaxAttempts:           3,
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		OrderID: order.ID, ProviderID: providerID, ProviderTransactionID: &pi.ID,
+		Amount: order.TotalAmount, Currency: currency, ExchangeRate: 1,
+		Status: "processing", PaymentMethod: strPtr("card"),
+		MaxAttempts: 3, CreatedAt: now, UpdatedAt: now,
 	}
-
-	if err := s.paymentRepo.Create(ctx, paymentEntity); err != nil {
-		return nil, fmt.Errorf("failed to persist payment record: %w", err)
+	if err := s.paymentRepo.CreateTx(ctx, tx, paymentEntity); err != nil {
+		return nil, fmt.Errorf("failed to persist payment intent: %w", err)
 	}
-
-	order.UpdatedAt = time.Now()
-
-	if err := s.orderRepo.Update(ctx, order); err != nil {
-		return nil, fmt.Errorf("failed to update order: %w", err)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit payment intent: %w", err)
 	}
-
 	return &paymentdto.CreatePaymentIntentResponse{
-		ClientSecret:    pi.ClientSecret,
-		PaymentIntentID: pi.ID,
-		Amount:          pi.Amount,
-		Currency:        string(pi.Currency),
+		ClientSecret: pi.ClientSecret, PaymentIntentID: pi.ID,
+		Amount: pi.Amount, Currency: string(pi.Currency),
 	}, nil
 }

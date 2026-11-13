@@ -1,0 +1,13 @@
+services:
+  reservation-worker:
+    image: ${OSMI_CONCURRENCY_IMAGE:?set the verified server image digest}
+    container_name: osmi-reservation-worker
+    restart: unless-stopped
+    entrypoint: ["/app/reservation-worker"]
+    env_file:
+      - /opt/osmi/.env.production
+    healthcheck:
+      disable: true
+    networks:
+      - application
+      - data
