@@ -392,16 +392,7 @@ SMTP_PORT=
 SMTP_USERNAME=
 SMTP_PASSWORD=
 SMTP_FROM=
-SMTP_REPLY_TO=
-SES_CONFIGURATION_SET=
 ```
-
-`SES_CONFIGURATION_SET` es opcional. Si se establece, debe existir en la misma
-región de SES que el endpoint SMTP y tener destinos de eventos habilitados.
-Un SMTP aceptado no confirma la entrega al buzón del comprador.
-`SMTP_FROM` debe ser una dirección simple de una identidad verificada en SES.
-`SMTP_REPLY_TO` es opcional y debe apuntar a un buzón atendido si el remitente
-no recibe respuestas.
 
 Nunca incluir valores reales en el repositorio, documentación, logs o issues.
 
