@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net/mail"
 	"os"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ type SESClient struct {
 	username string
 	password string
 	from     string
+	replyTo  string
 }
 
 type TicketEmailItem struct {
@@ -57,6 +59,7 @@ func NewSESClient() *SESClient {
 		username: strings.TrimSpace(os.Getenv("SMTP_USERNAME")),
 		password: os.Getenv("SMTP_PASSWORD"),
 		from:     strings.TrimSpace(os.Getenv("SMTP_FROM")),
+		replyTo:  strings.TrimSpace(os.Getenv("SMTP_REPLY_TO")),
 	}
 }
 
@@ -84,6 +87,15 @@ func (s *SESClient) validateConfig() error {
 			"SMTP configuration incomplete: missing %s",
 			strings.Join(missing, ", "),
 		)
+	}
+	if address, err := mail.ParseAddress(s.from); err != nil || address.Address != s.from {
+		return fmt.Errorf("SMTP_FROM must be a bare email address")
+	}
+	if s.replyTo != "" {
+		address, err := mail.ParseAddress(s.replyTo)
+		if err != nil || address.Address != s.replyTo {
+			return fmt.Errorf("SMTP_REPLY_TO must be a bare email address")
+		}
 	}
 
 	return nil
@@ -119,9 +131,15 @@ func (s *SESClient) SendOrderTicketsEmail(
 	templateItems := make([]ticketTemplateItem, 0, len(tickets))
 
 	m := gomail.NewMessage()
-	m.SetHeader("From", fmt.Sprintf("osmi <%s>", s.from))
+	m.SetAddressHeader("From", s.from, "OSMI Tickets")
+	if s.replyTo != "" {
+		m.SetAddressHeader("Reply-To", s.replyTo, "OSMI Tickets")
+	}
 	m.SetHeader("To", toEmail)
 	m.SetHeader("Subject", "Tus boletos están listos - osmi")
+	if configurationSet := strings.TrimSpace(os.Getenv("SES_CONFIGURATION_SET")); configurationSet != "" {
+		m.SetHeader("X-SES-CONFIGURATION-SET", configurationSet)
+	}
 
 	for i, ticket := range tickets {
 		if strings.TrimSpace(ticket.TicketCode) == "" {
@@ -191,7 +209,14 @@ func (s *SESClient) SendOrderTicketsEmail(
 		return fmt.Errorf("failed to render email template: %w", err)
 	}
 
-	m.SetBody("text/html", body.String())
+	var plain strings.Builder
+	fmt.Fprintf(&plain, "Hola %s,\n\nTus boletos para el pedido %s están listos.\n", customerName, orderID)
+	for _, ticket := range templateItems {
+		fmt.Fprintf(&plain, "\n%s — %s\n%s\n%s\nBoleto: %s\n", ticket.EventName, ticket.TicketTypeName, ticket.EventDate, ticket.EventLocation, ticket.TicketCode)
+	}
+	plain.WriteString("\nPresenta el código QR incluido en la versión HTML de este correo para acceder. Si no puedes verlo, contacta a soporte de OSMI con tu número de pedido.\n")
+	m.SetBody("text/plain", plain.String())
+	m.AddAlternative("text/html", body.String())
 
 	dialer := gomail.NewDialer(
 		s.host,

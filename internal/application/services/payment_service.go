@@ -727,11 +727,7 @@ func (s *PaymentService) ProcessPaidOrder(
 			err,
 		)
 	} else {
-		log.Printf(
-			"📧 Ticket email sent for order %s to %s",
-			order.PublicID,
-			order.CustomerEmail,
-		)
+		log.Printf("📧 Ticket email accepted by SMTP for order %s", order.PublicID)
 	}
 
 	return nil
