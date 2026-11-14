@@ -122,6 +122,9 @@ func (s *SESClient) SendOrderTicketsEmail(
 	m.SetHeader("From", fmt.Sprintf("osmi <%s>", s.from))
 	m.SetHeader("To", toEmail)
 	m.SetHeader("Subject", "Tus boletos están listos - osmi")
+	if configurationSet := strings.TrimSpace(os.Getenv("SES_CONFIGURATION_SET")); configurationSet != "" {
+		m.SetHeader("X-SES-CONFIGURATION-SET", configurationSet)
+	}
 
 	for i, ticket := range tickets {
 		if strings.TrimSpace(ticket.TicketCode) == "" {
@@ -191,7 +194,14 @@ func (s *SESClient) SendOrderTicketsEmail(
 		return fmt.Errorf("failed to render email template: %w", err)
 	}
 
-	m.SetBody("text/html", body.String())
+	var plain strings.Builder
+	fmt.Fprintf(&plain, "Hola %s,\n\nTus boletos para el pedido %s están listos.\n", customerName, orderID)
+	for _, ticket := range templateItems {
+		fmt.Fprintf(&plain, "\n%s — %s\n%s\n%s\nBoleto: %s\n", ticket.EventName, ticket.TicketTypeName, ticket.EventDate, ticket.EventLocation, ticket.TicketCode)
+	}
+	plain.WriteString("\nPresenta el código QR incluido en la versión HTML de este correo para acceder. Si no puedes verlo, contacta a soporte de OSMI con tu número de pedido.\n")
+	m.SetBody("text/plain", plain.String())
+	m.AddAlternative("text/html", body.String())
 
 	dialer := gomail.NewDialer(
 		s.host,
