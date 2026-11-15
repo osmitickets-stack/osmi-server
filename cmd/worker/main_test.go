@@ -55,7 +55,7 @@ func workerTestDB(t *testing.T) *pgxpool.Pool {
 		  EXISTS(SELECT 1 FROM public.osmi_checkin_test_guard WHERE marker='osmi-checkin-isolated-v1'),
 		  version, dirty FROM public.schema_migrations
 	`).Scan(&name, &user, &marker, &version, &dirty)
-	if err != nil || name != "osmidb_test" || user != "osmi" || !marker || version != 13 || dirty {
+	if err != nil || name != "osmidb_test" || user != "osmi" || !marker || version != 14 || dirty {
 		t.Fatal("isolated database guard failed")
 	}
 	return pool

@@ -1,0 +1,258 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: OSMI transactional SES feedback, least-privilege worker access and reputation alarms.
+
+Parameters:
+  OperationsEmail:
+    Type: String
+    NoEcho: true
+    Description: Monitored mailbox that will confirm the SNS alarm subscription.
+    AllowedPattern: '^[^@ ]+@[^@ ]+\.[^@ ]+$'
+
+Resources:
+  FeedbackKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Dedicated key for transactional SES feedback SNS messages.
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: SESCanPublishFeedback
+            Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action:
+              - kms:GenerateDataKey*
+              - kms:Decrypt
+            Resource: '*'
+          - Sid: SNSCanDeliverFeedback
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action:
+              - kms:GenerateDataKey*
+              - kms:Decrypt
+            Resource: '*'
+
+  FeedbackTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: osmi-transactional-feedback
+      KmsMasterKeyId: !Ref FeedbackKey
+
+  FeedbackTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref FeedbackTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: sns:*
+            Resource: !Ref FeedbackTopic
+          - Sid: SESConfigurationSetOnly
+            Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref FeedbackTopic
+            Condition:
+              StringEquals:
+                'AWS:SourceAccount': !Ref AWS::AccountId
+                'AWS:SourceArn': !Sub 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/osmi-transactional-prod'
+
+  FeedbackDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: osmi-transactional-feedback-dlq
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  FeedbackQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: osmi-transactional-feedback
+      ReceiveMessageWaitTimeSeconds: 20
+      VisibilityTimeout: 90
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt FeedbackDeadLetterQueue.Arn
+        maxReceiveCount: 5
+
+  FeedbackQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref FeedbackQueue]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: FeedbackTopicOnly
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt FeedbackQueue.Arn
+            Condition:
+              ArnEquals:
+                'aws:SourceArn': !Ref FeedbackTopic
+
+  FeedbackSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: FeedbackQueuePolicy
+    Properties:
+      TopicArn: !Ref FeedbackTopic
+      Protocol: sqs
+      Endpoint: !GetAtt FeedbackQueue.Arn
+      RawMessageDelivery: true
+
+  FeedbackEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    DependsOn:
+      - FeedbackTopicPolicy
+      - FeedbackSubscription
+    Properties:
+      ConfigurationSetName: osmi-transactional-prod
+      EventDestination:
+        Name: osmi-ses-sqs-feedback
+        Enabled: true
+        MatchingEventTypes:
+          - SEND
+          - DELIVERY
+          - DELIVERY_DELAY
+          - BOUNCE
+          - COMPLAINT
+          - REJECT
+          - RENDERING_FAILURE
+        SnsDestination:
+          TopicARN: !Ref FeedbackTopic
+
+  WorkerSqsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: osmi-transactional-feedback-consumer
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Resource: !GetAtt FeedbackQueue.Arn
+
+  WorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: osmi-transactional-email-worker
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns: [!Ref WorkerSqsPolicy]
+
+  WorkerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: osmi-transactional-email-worker
+      Roles: [!Ref WorkerRole]
+
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: osmi-transactional-email-alarms
+
+  AlarmSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref OperationsEmail
+
+  BounceRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: osmi-ses-bounce-rate
+      AlarmDescription: Account-level hard bounce rate at or above 3 percent.
+      Namespace: AWS/SES
+      MetricName: Reputation.BounceRate
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0.03
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  ComplaintRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: osmi-ses-complaint-rate
+      AlarmDescription: Account-level complaint rate at or above 0.05 percent.
+      Namespace: AWS/SES
+      MetricName: Reputation.ComplaintRate
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0.0005
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  QueueAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: osmi-ses-feedback-queue-oldest
+      AlarmDescription: SES feedback has waited at least ten minutes.
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt FeedbackQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 600
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  DeadLetterAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: osmi-ses-feedback-dlq
+      AlarmDescription: At least one SES feedback event could not be processed.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt FeedbackDeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+Outputs:
+  QueueURL:
+    Value: !Ref FeedbackQueue
+  InstanceProfileName:
+    Value: !Ref WorkerInstanceProfile
+  WorkerPolicyARN:
+    Value: !Ref WorkerSqsPolicy
+  AlarmTopicARN:
+    Value: !Ref AlarmTopic

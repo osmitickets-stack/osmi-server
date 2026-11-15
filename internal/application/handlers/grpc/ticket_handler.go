@@ -9,15 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	osmi "github.com/osmitickets-stack/osmi-protobuf/gen/pb"
 	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
 	ticketdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/ticket"
 	"github.com/osmitickets-stack/osmi-server/internal/api/helpers"
 	"github.com/osmitickets-stack/osmi-server/internal/application/services"
+	osmicontext "github.com/osmitickets-stack/osmi-server/internal/context"
 	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -284,40 +283,14 @@ func (h *TicketHandler) GetTicket(ctx context.Context, req *osmi.GetTicketReques
 
 // ListTickets lista tickets con filtros y paginación
 func (h *TicketHandler) ListTickets(ctx context.Context, req *osmi.ListTicketsRequest) (*osmi.TicketListResponse, error) {
+	userID, ok := osmicontext.GetUserID(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "authenticated user is required")
+	}
 	filter := &ticketdto.TicketFilter{
 		Status:   req.Status,
 		DateFrom: req.DateFrom,
 		DateTo:   req.DateTo,
-	}
-
-	// Extraer user_id del JWT desde la metadata gRPC
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		authHeaders := md.Get("authorization")
-		if len(authHeaders) > 0 {
-			tokenString := authHeaders[0]
-			if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
-				tokenString = tokenString[7:]
-			}
-			// Decodificar JWT para obtener user_id
-			token, _, err := new(jwt.Parser).ParseUnverified(tokenString, jwt.MapClaims{})
-			if err == nil {
-				if claims, ok := token.Claims.(jwt.MapClaims); ok {
-					if userID, ok := claims["user_id"].(string); ok && userID != "" {
-						customerID, err := h.ticketService.GetCustomerIDByUserID(ctx, userID)
-						if err == nil && customerID > 0 {
-							filter.CustomerID = &customerID
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if req.CustomerId != "" {
-		customerID, err := strconv.ParseInt(req.CustomerId, 10, 64)
-		if err == nil {
-			filter.CustomerID = &customerID
-		}
 	}
 
 	pagination := commondto.Pagination{
@@ -330,6 +303,17 @@ func (h *TicketHandler) ListTickets(ctx context.Context, req *osmi.ListTicketsRe
 	if pagination.PageSize <= 0 {
 		pagination.PageSize = 20
 	}
+	customerID, err := h.ticketService.GetCustomerIDByUserID(ctx, userID)
+	if errors.Is(err, services.ErrCustomerProfileNotFound) {
+		return &osmi.TicketListResponse{
+			Tickets: []*osmi.TicketResponse{}, Page: int32(pagination.Page),
+			PageSize: int32(pagination.PageSize),
+		}, nil
+	}
+	if err != nil {
+		return nil, status.Error(codes.Internal, "customer lookup failed")
+	}
+	filter.CustomerID = &customerID
 
 	tickets, total, err := h.ticketService.ListTickets(ctx, filter, pagination)
 	if err != nil {

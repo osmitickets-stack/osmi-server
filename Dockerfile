@@ -30,6 +30,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath -ldflags="-s -w" \
     -o reservation-worker ./cmd/worker
 
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath -ldflags="-s -w" \
+    -o email-worker ./cmd/email-worker
+
 # ==========================
 # Runtime
 # ==========================
@@ -47,6 +51,7 @@ WORKDIR /app
 COPY --from=builder /app/server .
 COPY --from=builder /app/reissue-legacy-qr .
 COPY --from=builder /app/reservation-worker .
+COPY --from=builder /app/email-worker .
 
 USER osmi
 

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"gopkg.in/gomail.v2"
 )
 
@@ -101,14 +102,38 @@ func (s *SESClient) validateConfig() error {
 	return nil
 }
 
+// ValidateConfig lets the worker fail at startup instead of discovering a
+// missing SMTP setting only after a paid order has queued an email.
+func (s *SESClient) ValidateConfig() error {
+	if s == nil {
+		return fmt.Errorf("SMTP client is not configured")
+	}
+	return s.validateConfig()
+}
+
 func (s *SESClient) SendOrderTicketsEmail(
 	toEmail string,
 	customerName string,
 	orderID string,
 	tickets []TicketEmailItem,
 ) error {
+	return s.SendOrderTicketsEmailWithAttempt(toEmail, customerName, orderID, tickets, uuid.Nil)
+}
+
+// SendOrderTicketsEmailWithAttempt tags an outbox attempt so SES feedback can
+// be correlated without exposing a customer address or signed QR in a tag.
+func (s *SESClient) SendOrderTicketsEmailWithAttempt(
+	toEmail string,
+	customerName string,
+	orderID string,
+	tickets []TicketEmailItem,
+	attemptID uuid.UUID,
+) error {
 	if err := s.validateConfig(); err != nil {
 		return err
+	}
+	if attemptID != uuid.Nil && strings.TrimSpace(os.Getenv("SES_CONFIGURATION_SET")) == "" {
+		return fmt.Errorf("SES_CONFIGURATION_SET is required for tracked ticket email")
 	}
 
 	toEmail = strings.TrimSpace(toEmail)
@@ -139,6 +164,9 @@ func (s *SESClient) SendOrderTicketsEmail(
 	m.SetHeader("Subject", "Tus boletos están listos - osmi")
 	if configurationSet := strings.TrimSpace(os.Getenv("SES_CONFIGURATION_SET")); configurationSet != "" {
 		m.SetHeader("X-SES-CONFIGURATION-SET", configurationSet)
+	}
+	if attemptID != uuid.Nil {
+		m.SetHeader("X-SES-MESSAGE-TAGS", "osmi_attempt_id="+attemptID.String())
 	}
 
 	for i, ticket := range tickets {

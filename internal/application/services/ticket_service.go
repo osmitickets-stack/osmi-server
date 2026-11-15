@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	commondto "github.com/osmitickets-stack/osmi-server/internal/api/dto/common"
 	ticketdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/ticket"
 	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
@@ -20,6 +20,7 @@ import (
 )
 
 var (
+	ErrCustomerProfileNotFound = errors.New("customer profile not found")
 	ErrCheckInPrincipalInvalid = errors.New(
 		"check-in authorization returned invalid principal",
 	)
@@ -874,22 +875,29 @@ func (s *TicketService) ReleaseExpiredReservations(ctx context.Context) (int64, 
 }
 
 func (s *TicketService) GetCustomerIDByUserID(ctx context.Context, userID string) (int64, error) {
-	customers, _, err := s.customerRepo.Find(ctx, &repository.CustomerFilter{
-		UserID: stringToInt64Ptr(userID),
-		Limit:  1,
-	})
-	if err != nil || len(customers) == 0 {
-		return 0, fmt.Errorf("customer not found for user %s", userID)
+	publicID, err := uuid.Parse(userID)
+	if err != nil || publicID == uuid.Nil {
+		return 0, errors.New("authenticated user ID is invalid")
 	}
-	return customers[0].ID, nil
-}
-
-func stringToInt64Ptr(s string) *int64 {
-	id, err := strconv.ParseInt(s, 10, 64)
+	tx, err := s.ticketRepo.BeginTx(ctx)
 	if err != nil {
-		return nil
+		return 0, fmt.Errorf("begin customer lookup: %w", err)
 	}
-	return &id
+	defer tx.Rollback(ctx)
+	var customerID int64
+	err = tx.QueryRow(ctx, `
+		SELECT c.id
+		FROM crm.customers c
+		JOIN auth.users u ON u.id=c.user_id
+		WHERE u.public_uuid=$1 AND u.is_active AND c.is_active
+	`, publicID).Scan(&customerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrCustomerProfileNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read customer profile: %w", err)
+	}
+	return customerID, nil
 }
 
 func (s *TicketService) VerifyTicketCredential(

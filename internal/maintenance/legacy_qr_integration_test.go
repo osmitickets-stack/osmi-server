@@ -34,7 +34,7 @@ func TestReissueLegacyQRIntegration(t *testing.T) {
 	var marker string
 	var version int
 	var dirty bool
-	if err := pool.QueryRow(ctx, `SELECT marker, (SELECT version FROM public.schema_migrations), (SELECT dirty FROM public.schema_migrations) FROM public.osmi_checkin_test_guard`).Scan(&marker, &version, &dirty); err != nil || marker != "osmi-checkin-isolated-v1" || version != 13 || dirty {
+	if err := pool.QueryRow(ctx, `SELECT marker, (SELECT version FROM public.schema_migrations), (SELECT dirty FROM public.schema_migrations) FROM public.osmi_checkin_test_guard`).Scan(&marker, &version, &dirty); err != nil || marker != "osmi-checkin-isolated-v1" || version != 14 || dirty {
 		t.Fatal("isolated PostgreSQL marker or schema invalid")
 	}
 

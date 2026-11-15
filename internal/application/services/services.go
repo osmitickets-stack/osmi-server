@@ -275,7 +275,7 @@ func (s *Server) ListEvents(ctx context.Context, req *osmi.ListEventsRequest) (*
 
 // CreateCustomer implementa el método gRPC para crear clientes
 func (s *Server) CreateCustomer(ctx context.Context, req *osmi.CreateCustomerRequest) (*osmi.CustomerResponse, error) {
-	log.Printf("Creating customer: %s, email: %s", req.Name, req.Email)
+	log.Printf("Creating customer")
 
 	if strings.TrimSpace(req.Name) == "" {
 		return nil, fmt.Errorf("name is required")
@@ -305,15 +305,15 @@ func (s *Server) CreateCustomer(ctx context.Context, req *osmi.CreateCustomerReq
 
 	err := s.CustomerRepo.Create(ctx, customer)
 	if err != nil {
-		log.Printf("Error creating customer: %v", err)
+		log.Printf("Error creating customer: %T", err)
 		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "23505") {
-			return nil, fmt.Errorf("customer with email %s already exists", req.Email)
+			return nil, fmt.Errorf("customer with this email already exists")
 		}
 		return nil, fmt.Errorf("error creating customer: %w", err)
 	}
 
-	log.Printf("Customer created successfully: %s (ID: %d, PublicID: %s)",
-		req.Email, customer.ID, customer.PublicID)
+	log.Printf("Customer created successfully (ID: %d, PublicID: %s)",
+		customer.ID, customer.PublicID)
 
 	return &osmi.CustomerResponse{
 		Id:        int32(customer.ID),
@@ -357,7 +357,7 @@ func (s *Server) GetCustomer(ctx context.Context, req *osmi.GetCustomerRequest) 
 
 // CreateUser crea un nuevo usuario
 func (s *Server) CreateUser(ctx context.Context, req *osmi.CreateUserRequest) (*osmi.UserResponse, error) {
-	log.Printf("Creating user: %s, email: %s", req.Name, req.Email)
+	log.Printf("Creating user")
 
 	if strings.TrimSpace(req.Name) == "" {
 		return nil, fmt.Errorf("name is required")
@@ -409,15 +409,15 @@ func (s *Server) CreateUser(ctx context.Context, req *osmi.CreateUserRequest) (*
 
 	err := s.UserRepo.Create(ctx, user)
 	if err != nil {
-		log.Printf("Error creating user: %v", err)
+		log.Printf("Error creating user: %T", err)
 		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "23505") {
-			return nil, fmt.Errorf("user with email %s already exists", req.Email)
+			return nil, fmt.Errorf("user with this email already exists")
 		}
 		return nil, fmt.Errorf("error creating user: %w", err)
 	}
 
-	log.Printf("User created successfully: %s (ID: %d, PublicID: %s)",
-		req.Email, user.ID, user.PublicID)
+	log.Printf("User created successfully (ID: %d, PublicID: %s)",
+		user.ID, user.PublicID)
 
 	// Obtener el nombre del rol para la respuesta
 	roleName := "customer"

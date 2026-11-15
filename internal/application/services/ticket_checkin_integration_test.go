@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -691,7 +692,14 @@ func TestCheckInTicketAtomicIntegration(t *testing.T) {
 			now.Add(2*time.Hour),
 		)
 
-		tampered := fixture.Credential[:len(fixture.Credential)-1] + "A"
+		// Change a significant signature character. Replacing the last one
+		// with a fixed value could leave it unchanged for some signed tickets.
+		signatureStart := strings.LastIndexByte(fixture.Credential, '.') + 1
+		replacement := byte('A')
+		if fixture.Credential[signatureStart] == replacement {
+			replacement = 'B'
+		}
+		tampered := fixture.Credential[:signatureStart] + string(replacement) + fixture.Credential[signatureStart+1:]
 
 		result, err := service.CheckInTicket(
 			checkInAuthorizedContext(fixture),

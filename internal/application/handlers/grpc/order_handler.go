@@ -23,8 +23,8 @@ func NewOrderHandler(orderService *services.OrderService) *OrderHandler {
 }
 
 func (h *OrderHandler) CreateOrder(ctx context.Context, req *osmi.CreateOrderRequest) (*osmi.OrderResponse, error) {
-	if req.CustomerId == "" {
-		return nil, status.Error(codes.InvalidArgument, "customer_id is required")
+	if req == nil || req.CustomerEmail == "" {
+		return nil, status.Error(codes.InvalidArgument, "customer_email is required")
 	}
 	if len(req.Items) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "at least one item is required")
@@ -62,7 +62,6 @@ func (h *OrderHandler) CreateOrder(ctx context.Context, req *osmi.CreateOrderReq
 
 	return &osmi.OrderResponse{
 		PublicId:    order.PublicID,
-		CustomerId:  req.CustomerId,
 		Status:      order.Status,
 		TotalAmount: order.TotalAmount,
 		Currency:    order.Currency,

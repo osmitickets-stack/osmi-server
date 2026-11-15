@@ -2,15 +2,39 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/email"
 	postgres "github.com/osmitickets-stack/osmi-server/internal/infrastructure/repositories/postgres"
 	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
 )
+
+type fakeTicketEmailSender struct {
+	attempts []uuid.UUID
+	failNext bool
+}
+
+func (s *fakeTicketEmailSender) SendOrderTicketsEmailWithAttempt(
+	_ string, _ string, _ string, tickets []email.TicketEmailItem, attempt uuid.UUID,
+) error {
+	if len(tickets) != 1 || tickets[0].QRBase64 == "" || attempt == uuid.Nil {
+		return errors.New("invalid ticket email fixture")
+	}
+	s.attempts = append(s.attempts, attempt)
+	if s.failNext {
+		s.failNext = false
+		return errors.New("simulated SMTP failure")
+	}
+	return nil
+}
 
 func requireIntegrationDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -63,7 +87,7 @@ func requireIntegrationDB(t *testing.T) *pgxpool.Pool {
 	}
 
 	if databaseName != "osmidb_test" || databaseUser != "osmi" ||
-		markerCount != 1 || marker != "osmi-checkin-isolated-v1" || migrationVersion != 13 || migrationDirty {
+		markerCount != 1 || marker != "osmi-checkin-isolated-v1" || migrationVersion != 14 || migrationDirty {
 		t.Fatal("REFUSING integration tests: database identity or schema guard mismatch")
 	}
 
@@ -121,6 +145,8 @@ func TestProcessPaidOrderConcurrentIsIdempotent(t *testing.T) {
 	)
 
 	// ========================================================
+	service.SetTicketEmailOutbox(email.NewTicketEmailOutbox(pool))
+
 	// UNIQUE FIXTURE DATA
 	// ========================================================
 
@@ -516,6 +542,95 @@ func TestProcessPaidOrderConcurrentIsIdempotent(t *testing.T) {
 			"expected available_quantity 0, got %d",
 			availableQuantity,
 		)
+	}
+	var emailJobs int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM notifications.ticket_email_jobs WHERE order_id=$1
+	`, orderID).Scan(&emailJobs); err != nil {
+		t.Fatalf("read ticket email outbox: %v", err)
+	}
+	if emailJobs != 1 {
+		t.Fatalf("concurrent fulfillment created %d email jobs; want one", emailJobs)
+	}
+	sender := &fakeTicketEmailSender{failNext: true}
+	dispatcher := email.NewTicketEmailDispatcher(pool, sender)
+	processed, dispatchErr := dispatcher.ProcessOne(ctx)
+	if !processed || dispatchErr == nil {
+		t.Fatalf("expected one retryable SMTP failure: processed=%v err=%v", processed, dispatchErr)
+	}
+	var jobStatus string
+	if err := pool.QueryRow(ctx, `
+		SELECT status FROM notifications.ticket_email_jobs WHERE order_id=$1
+	`, orderID).Scan(&jobStatus); err != nil || jobStatus != "retrying" {
+		t.Fatalf("SMTP failure did not persist retry: status=%q err=%v", jobStatus, err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE notifications.ticket_email_jobs
+		SET next_attempt_at=NOW() WHERE order_id=$1 AND status='retrying'
+	`, orderID); err != nil {
+		t.Fatal(err)
+	}
+	processed, dispatchErr = dispatcher.ProcessOne(ctx)
+	if !processed || dispatchErr != nil || len(sender.attempts) != 2 {
+		t.Fatalf("email retry failed: processed=%v err=%v attempts=%d", processed, dispatchErr, len(sender.attempts))
+	}
+	event := &email.SESEvent{EventType: "Delivery", AttemptID: sender.attempts[1]}
+	event.Mail.MessageID = "ses-integration-delivery"
+	if err := email.NewTicketEmailOutbox(pool).RecordSESEvent(ctx, event); err != nil {
+		t.Fatalf("record SES delivery: %v", err)
+	}
+	if err := email.NewTicketEmailOutbox(pool).RecordSESEvent(ctx, event); err != nil {
+		t.Fatalf("duplicate SES delivery: %v", err)
+	}
+	var attemptCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT j.status, count(a.id)
+		FROM notifications.ticket_email_jobs j
+		JOIN notifications.ticket_email_attempts a ON a.job_id=j.id
+		WHERE j.order_id=$1 GROUP BY j.id
+	`, orderID).Scan(&jobStatus, &attemptCount); err != nil || jobStatus != "delivered" || attemptCount != 2 {
+		t.Fatalf("email delivery state mismatch: status=%q attempts=%d err=%v", jobStatus, attemptCount, err)
+	}
+	complaintPayload := []byte(fmt.Sprintf(`{
+		"eventType":"Complaint",
+		"mail":{"messageId":"ses-integration-delivery","destination":["integration@example.com"],
+		        "tags":{"osmi_attempt_id":["%s"]}},
+		"complaint":{"complainedRecipients":[{"emailAddress":"integration@example.com"}]}
+	}`, sender.attempts[1]))
+	complaint, err := email.DecodeSESEvent(complaintPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := email.NewTicketEmailOutbox(pool).RecordSESEvent(ctx, complaint); err != nil {
+		t.Fatalf("record SES complaint: %v", err)
+	}
+	suppressed, err := email.NewTicketEmailOutbox(pool).IsSuppressed(ctx, "Integration@Example.com")
+	if err != nil || !suppressed {
+		t.Fatalf("complaint did not suppress recipient: suppressed=%v err=%v", suppressed, err)
+	}
+	sum := sha256.Sum256([]byte("integration@example.com"))
+	t.Cleanup(func() {
+		cleanup, done := context.WithTimeout(context.Background(), 5*time.Second)
+		defer done()
+		_, _ = pool.Exec(cleanup, `DELETE FROM notifications.email_suppressions WHERE recipient_sha256=$1`, hex.EncodeToString(sum[:]))
+	})
+	if err := pool.QueryRow(ctx, `
+		SELECT status FROM notifications.ticket_email_jobs WHERE order_id=$1
+	`, orderID).Scan(&jobStatus); err != nil || jobStatus != "complained" {
+		t.Fatalf("complaint state mismatch: status=%q err=%v", jobStatus, err)
+	}
+	wrongRecipientPayload := []byte(fmt.Sprintf(`{
+		"eventType":"Bounce",
+		"mail":{"messageId":"ses-integration-delivery","destination":["other@example.invalid"],
+		        "tags":{"osmi_attempt_id":["%s"]}},
+		"bounce":{"bouncedRecipients":[{"emailAddress":"other@example.invalid"}]}
+	}`, sender.attempts[1]))
+	wrongRecipient, err := email.DecodeSESEvent(wrongRecipientPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := email.NewTicketEmailOutbox(pool).RecordSESEvent(ctx, wrongRecipient); err == nil {
+		t.Fatal("mismatched SES recipient was accepted")
 	}
 
 	t.Logf(
