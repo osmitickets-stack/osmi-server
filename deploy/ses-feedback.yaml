@@ -31,6 +31,10 @@ Resources:
               - kms:GenerateDataKey*
               - kms:Decrypt
             Resource: '*'
+            Condition:
+              StringEquals:
+                'aws:SourceAccount': !Ref AWS::AccountId
+                'aws:SourceArn': !Sub 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/osmi-transactional-prod'
           - Sid: SNSCanDeliverFeedback
             Effect: Allow
             Principal:
@@ -39,6 +43,9 @@ Resources:
               - kms:GenerateDataKey*
               - kms:Decrypt
             Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:EncryptionContext:aws:sns:topicArn': !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:osmi-transactional-feedback'
 
   FeedbackTopic:
     Type: AWS::SNS::Topic
