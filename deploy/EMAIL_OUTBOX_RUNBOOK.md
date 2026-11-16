@@ -8,7 +8,7 @@
 - PostgreSQL comercial está en versión 13 limpia antes de migrar; no hay otra migración en curso.
 - El configuration set `osmi-transactional-prod` y la identidad `myosmi.com` permanecen activos en `us-east-1`.
 - La plantilla `ses-feedback.yaml` se valida como cambio de CloudFormation antes de ejecutarse. Confirmar la suscripción del buzón de alarmas.
-- Verificar el rol IAM existente de EC2. Adjuntar solo `WorkerSqsPolicy` al rol existente si ya hay instance profile; no reemplazarlo a ciegas. Si no existe, revisar el perfil nuevo y el hop limit IMDSv2 para contenedores.
+- La plantilla SES/SQS crea `WorkerSqsPolicy` sin adjuntarla; no crea, modifica ni reemplaza roles o perfiles IAM de EC2. Antes de habilitar el Worker, comprobar el estado real del perfil asociado a `osmi-api-prod` y las dependencias de respaldo. Adjuntar la política a un rol operativo verificado mediante un cambio separado y revisar IMDSv2 para contenedores. Detener el despliegue si no hay credenciales de rol funcionales.
 - El Worker debe poder resolver SQS y SES por la red `application` y PostgreSQL por `data`. La cola URL y el Reply-To supervisado se suministran en la terminal privada de EC2, sin publicarlos en Git.
 
 ## Secuencia de publicación
