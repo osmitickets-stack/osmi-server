@@ -10,6 +10,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds"
+	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/osmitickets-stack/osmi-server/internal/database"
 	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/email"
@@ -44,12 +46,18 @@ func main() {
 	}
 	defer database.Close()
 	ctx := context.Background()
-	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	roleProvider := ec2rolecreds.New(func(options *ec2rolecreds.Options) {
+		options.Client = imds.New(imds.Options{EnableFallback: aws.FalseTernary})
+	})
+	awsConfig, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(region),
+		config.WithCredentialsProvider(aws.NewCredentialsCache(roleProvider)),
+	)
 	if err != nil {
 		log.Fatalf("email worker AWS configuration unavailable: %T", err)
 	}
 	if _, err := awsConfig.Credentials.Retrieve(ctx); err != nil {
-		log.Fatalf("email worker AWS credentials unavailable: %T", err)
+		log.Fatalf("email worker EC2 role credentials unavailable: %T", err)
 	}
 	queue := sqs.NewFromConfig(awsConfig)
 	outbox := email.NewTicketEmailOutbox(database.Pool)

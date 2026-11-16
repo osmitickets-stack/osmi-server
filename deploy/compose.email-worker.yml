@@ -3,14 +3,24 @@ services:
     image: "${OSMI_EMAIL_IMAGE:?set a verified ghcr.io digest}"
     container_name: osmi-email-worker
     restart: unless-stopped
-    env_file:
-      - /opt/osmi/.env.production
     environment:
+      DATABASE_URL: "${DATABASE_URL:-}"
+      DB_HOST: "${DB_HOST:-}"
+      DB_PORT: "${DB_PORT:-}"
+      DB_USER: "${DB_USER:-}"
+      DB_PASSWORD: "${DB_PASSWORD:-}"
+      DB_NAME: "${DB_NAME:-}"
+      DB_SSLMODE: "${DB_SSLMODE:-disable}"
+      SMTP_HOST: "${SMTP_HOST:?set the SES SMTP endpoint}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USERNAME: "${SMTP_USERNAME:?set the SES SMTP user}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:?set the SES SMTP password}"
       SMTP_FROM: boletos@myosmi.com
       SMTP_REPLY_TO: "${OSMI_EMAIL_REPLY_TO:?set the monitored reply-to mailbox}"
       SES_CONFIGURATION_SET: osmi-transactional-prod
       SES_EVENTS_QUEUE_URL: "${SES_EVENTS_QUEUE_URL:?set the CloudFormation queue URL}"
       AWS_REGION: us-east-1
+      AWS_EC2_METADATA_V1_DISABLED: "true"
     entrypoint: ["/app/email-worker"]
     read_only: true
     tmpfs:
