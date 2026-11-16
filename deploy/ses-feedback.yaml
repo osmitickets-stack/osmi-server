@@ -149,27 +149,7 @@ Resources:
             Action:
               - sqs:ReceiveMessage
               - sqs:DeleteMessage
-              - sqs:GetQueueAttributes
             Resource: !GetAtt FeedbackQueue.Arn
-
-  WorkerRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: osmi-transactional-email-worker
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns: [!Ref WorkerSqsPolicy]
-
-  WorkerInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      InstanceProfileName: osmi-transactional-email-worker
-      Roles: [!Ref WorkerRole]
 
   AlarmTopic:
     Type: AWS::SNS::Topic
@@ -252,8 +232,6 @@ Resources:
 Outputs:
   QueueURL:
     Value: !Ref FeedbackQueue
-  InstanceProfileName:
-    Value: !Ref WorkerInstanceProfile
   WorkerPolicyARN:
     Value: !Ref WorkerSqsPolicy
   AlarmTopicARN:
