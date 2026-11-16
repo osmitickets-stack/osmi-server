@@ -59,13 +59,8 @@ Resources:
       Topics: [!Ref FeedbackTopic]
       PolicyDocument:
         Version: '2012-10-17'
+        Id: osmi-transactional-feedback-policy
         Statement:
-          - Sid: AccountAdministration
-            Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
-            Action: sns:*
-            Resource: !Ref FeedbackTopic
           - Sid: SESConfigurationSetOnly
             Effect: Allow
             Principal:
