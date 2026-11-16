@@ -150,6 +150,7 @@ func main() {
 		emailClient,
 		ticketCredentialService,
 	)
+	paymentService.SetTicketEmailOutbox(email.NewTicketEmailOutbox(database.Pool))
 
 	// ================================================
 	// HANDLERS

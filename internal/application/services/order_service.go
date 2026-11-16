@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	orderdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/order"
+	osmicontext "github.com/osmitickets-stack/osmi-server/internal/context"
 	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
@@ -49,17 +51,9 @@ func (s *OrderService) CreateOrder(
 		)
 	}
 
-	customer, err := s.customerRepo.GetByPublicID(
-		ctx,
-		req.CustomerID,
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf(
-			"customer not found: %w",
-			err,
-		)
+	if req == nil || strings.TrimSpace(req.CustomerEmail) == "" {
+		return nil, nil, fmt.Errorf("customer email is required")
 	}
-
 	tx, err := s.ticketRepo.BeginTx(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf(
@@ -68,6 +62,30 @@ func (s *OrderService) CreateOrder(
 		)
 	}
 	defer tx.Rollback(ctx)
+	// The client-provided customer_id is never an ownership proof. The
+	// gateway forwards only a validated user identity over trusted mTLS.
+	// Guest orders deliberately have no customer profile association.
+	var customerID *int64
+	var accountName string
+	if userPublicID, authenticated := osmicontext.GetUserID(ctx); authenticated {
+		var id int64
+		var accountEmail string
+		err = tx.QueryRow(ctx, `
+			SELECT c.id, c.full_name, u.email::text
+			FROM auth.users u JOIN crm.customers c ON c.user_id=u.id
+			WHERE u.public_uuid=$1 AND u.is_active AND c.is_active
+		`, userPublicID).Scan(&id, &accountName, &accountEmail)
+		if err == pgx.ErrNoRows {
+			return nil, nil, fmt.Errorf("authenticated customer profile is unavailable")
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("load authenticated customer profile: %w", err)
+		}
+		if !strings.EqualFold(strings.TrimSpace(req.CustomerEmail), strings.TrimSpace(accountEmail)) {
+			return nil, nil, fmt.Errorf("use the email address of your signed-in account")
+		}
+		customerID = &id
+	}
 
 	var totalAmount float64
 	var tickets []*entities.Ticket
@@ -136,7 +154,7 @@ func (s *OrderService) CreateOrder(
 				PublicID:     ticketPublicID,
 				TicketTypeID: ticketType.ID,
 				EventID:      ticketType.EventID,
-				CustomerID:   &customer.ID,
+				CustomerID:   customerID,
 				Code: fmt.Sprintf(
 					"ORD-%d-%d-%s",
 					ticketType.EventID,
@@ -180,11 +198,14 @@ func (s *OrderService) CreateOrder(
 
 	customerName := strings.TrimSpace(req.CustomerName)
 	if customerName == "" {
-		customerName = customer.FullName
+		customerName = accountName
+	}
+	if customerName == "" {
+		customerName = "Cliente OSMI"
 	}
 
 	order := &entities.Order{
-		CustomerID:       &customer.ID,
+		CustomerID:       customerID,
 		CustomerEmail:    req.CustomerEmail,
 		CustomerName:     &customerName,
 		Subtotal:         totalAmount,

@@ -76,8 +76,8 @@ BEGIN
     (SELECT marker FROM public.osmi_checkin_test_guard LIMIT 1) IS DISTINCT FROM 'osmi-checkin-isolated-v1' THEN
   RAISE EXCEPTION 'Refusing: isolated database marker missing';
  END IF;
- IF NOT EXISTS (SELECT 1 FROM public.schema_migrations WHERE version=13 AND dirty=false) THEN
-  RAISE EXCEPTION 'Refusing: schema must be clean at version 13';
+ IF NOT EXISTS (SELECT 1 FROM public.schema_migrations WHERE version=14 AND dirty=false) THEN
+  RAISE EXCEPTION 'Refusing: schema must be clean at version 14';
  END IF;
 END $guard$;
 DO $fixture$

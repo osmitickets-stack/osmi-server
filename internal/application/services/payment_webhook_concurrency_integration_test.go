@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/email"
 	postgres "github.com/osmitickets-stack/osmi-server/internal/infrastructure/repositories/postgres"
 	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
 )
@@ -55,6 +56,8 @@ func TestHandleWebhookConcurrentSameEventIsIdempotent(t *testing.T) {
 		nil,
 		signer,
 	)
+
+	service.SetTicketEmailOutbox(email.NewTicketEmailOutbox(pool))
 
 	suffix := time.Now().UnixNano()
 

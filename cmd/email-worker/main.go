@@ -1,0 +1,140 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/osmitickets-stack/osmi-server/internal/database"
+	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/email"
+)
+
+const (
+	region          = "us-east-1"
+	queueWait       = 20
+	queueVisibility = 90
+	receiveBeat     = "/tmp/osmi-email-receive.heartbeat"
+	dispatchBeat    = "/tmp/osmi-email-dispatch.heartbeat"
+)
+
+func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--health" {
+		if heartbeatFresh(receiveBeat) && heartbeatFresh(dispatchBeat) {
+			return
+		}
+		os.Exit(1)
+	}
+	queueURL := strings.TrimSpace(os.Getenv("SES_EVENTS_QUEUE_URL"))
+	if queueURL == "" || os.Getenv("SES_CONFIGURATION_SET") != "osmi-transactional-prod" {
+		log.Fatal("email worker queue or SES configuration set is missing")
+	}
+	if os.Getenv("SMTP_HOST") != "email-smtp.us-east-1.amazonaws.com" ||
+		os.Getenv("SMTP_USERNAME") == "" || os.Getenv("SMTP_PASSWORD") == "" ||
+		os.Getenv("SMTP_FROM") != "boletos@myosmi.com" {
+		log.Fatal("email worker SMTP configuration is incomplete")
+	}
+	if err := database.Init(); err != nil {
+		log.Fatalf("email worker database unavailable: %T", err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		log.Fatalf("email worker AWS configuration unavailable: %T", err)
+	}
+	if _, err := awsConfig.Credentials.Retrieve(ctx); err != nil {
+		log.Fatalf("email worker AWS credentials unavailable: %T", err)
+	}
+	queue := sqs.NewFromConfig(awsConfig)
+	outbox := email.NewTicketEmailOutbox(database.Pool)
+	sender := email.NewSESClient()
+	if err := sender.ValidateConfig(); err != nil {
+		log.Fatal("email worker SMTP configuration is invalid")
+	}
+	dispatcher := email.NewTicketEmailDispatcher(database.Pool, sender)
+	go dispatchLoop(ctx, outbox, dispatcher)
+	for {
+		if err := receiveEvents(ctx, queue, queueURL, outbox); err != nil {
+			log.Printf("SES event receive failed: %T", err)
+			time.Sleep(5 * time.Second)
+		} else {
+			writeHeartbeat(receiveBeat)
+		}
+	}
+}
+
+func writeHeartbeat(path string) {
+	if err := os.WriteFile(path, []byte("ok"), 0600); err != nil {
+		log.Printf("email worker heartbeat failed: %T", err)
+	}
+}
+
+func heartbeatFresh(path string) bool {
+	stat, err := os.Stat(path)
+	return err == nil && time.Since(stat.ModTime()) < 90*time.Second
+}
+
+func dispatchLoop(ctx context.Context, outbox *email.TicketEmailOutbox, dispatcher *email.TicketEmailDispatcher) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		runCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		maintenanceErr := outbox.ExhaustExpiredFinalLeases(runCtx)
+		if maintenanceErr != nil {
+			log.Printf("ticket email lease maintenance failed: %T", maintenanceErr)
+		}
+		for i := 0; i < 10; i++ {
+			processed, err := dispatcher.ProcessOne(runCtx)
+			if err != nil {
+				log.Printf("ticket email dispatch: %v", err)
+			}
+			if !processed {
+				break
+			}
+		}
+		cancel()
+		if maintenanceErr == nil {
+			writeHeartbeat(dispatchBeat)
+		}
+		<-ticker.C
+	}
+}
+
+func receiveEvents(ctx context.Context, queue *sqs.Client, queueURL string, outbox *email.TicketEmailOutbox) error {
+	result, err := queue.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+		QueueUrl: aws.String(queueURL), MaxNumberOfMessages: 10,
+		WaitTimeSeconds: queueWait, VisibilityTimeout: queueVisibility,
+	})
+	if err != nil {
+		return err
+	}
+	for _, message := range result.Messages {
+		if message.Body == nil || message.ReceiptHandle == nil {
+			continue
+		}
+		event, err := email.DecodeSESEvent([]byte(*message.Body))
+		if err == nil {
+			applyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			err = outbox.RecordSESEvent(applyCtx, event)
+			cancel()
+		}
+		if err != nil && !errors.Is(err, email.ErrUntrackedSESEvent) {
+			// Leave the message for SQS retry and eventually its dead-letter queue.
+			log.Printf("SES event processing failed: %T", err)
+			continue
+		}
+		_, err = queue.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+			QueueUrl: aws.String(queueURL), ReceiptHandle: message.ReceiptHandle,
+		})
+		if err != nil {
+			log.Printf("SES event delete failed: %T", err)
+		}
+	}
+	return nil
+}

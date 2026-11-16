@@ -31,7 +31,7 @@ func ReissueLegacyQR(ctx context.Context, pool *pgxpool.Pool, signer *security.T
 	if err := tx.QueryRow(ctx, `SELECT current_database(), version, dirty FROM public.schema_migrations`).Scan(&database, &version, &dirty); err != nil {
 		return 0, fmt.Errorf("read database identity: %w", err)
 	}
-	if database != expectedDatabase || version != 13 || dirty {
+	if database != expectedDatabase || (version != 13 && version != 14) || dirty {
 		return 0, errors.New("database identity or migration state does not match")
 	}
 

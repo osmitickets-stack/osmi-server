@@ -6,6 +6,7 @@ import (
 	"time"
 
 	ticketdto "github.com/osmitickets-stack/osmi-server/internal/api/dto/ticket"
+	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/email"
 	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/repositories/postgres"
 )
 
@@ -85,6 +86,7 @@ func testPaidOrderToCheckIn(t *testing.T, legacyReservation, omitSigner bool) {
 		postgres.NewTicketTypeRepository(pool),
 		nil, nil, "", nil, paymentSigner,
 	)
+	payment.SetTicketEmailOutbox(email.NewTicketEmailOutbox(pool))
 	if omitSigner {
 		if err := payment.ProcessPaidOrder(ctx, orderPublicID); err == nil {
 			t.Fatal("legacy reservation was sold without a signer")

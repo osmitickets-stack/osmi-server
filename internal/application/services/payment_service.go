@@ -17,7 +17,6 @@ import (
 	"github.com/osmitickets-stack/osmi-server/internal/domain/entities"
 	"github.com/osmitickets-stack/osmi-server/internal/domain/repository"
 	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/email"
-	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/qr"
 	"github.com/osmitickets-stack/osmi-server/internal/shared/security"
 	"github.com/stripe/stripe-go/v83"
 	"github.com/stripe/stripe-go/v83/webhook"
@@ -32,6 +31,7 @@ type PaymentService struct {
 	stripeClient     stripeIntentClient
 	webhookSecret    string
 	emailClient      *email.SESClient
+	emailOutbox      *email.TicketEmailOutbox
 	ticketCredential *security.TicketCredentialService
 }
 
@@ -166,6 +166,10 @@ func NewPaymentService(
 		service.ticketCredential = ticketCredential[0]
 	}
 	return service
+}
+
+func (s *PaymentService) SetTicketEmailOutbox(outbox *email.TicketEmailOutbox) {
+	s.emailOutbox = outbox
 }
 
 func strPtr(s string) *string {
@@ -438,6 +442,9 @@ func (s *PaymentService) ProcessPaidOrder(
 	ctx context.Context,
 	orderID string,
 ) error {
+	if s.emailOutbox == nil {
+		return fmt.Errorf("ticket email outbox is not configured")
+	}
 
 	tx, err := s.ticketRepo.BeginTx(ctx)
 	if err != nil {
@@ -683,6 +690,9 @@ func (s *PaymentService) ProcessPaidOrder(
 			err,
 		)
 	}
+	if err := s.emailOutbox.EnqueueTx(ctx, tx, order.ID); err != nil {
+		return err
+	}
 
 	// ========================================================
 	// COMMIT
@@ -712,177 +722,7 @@ func (s *PaymentService) ProcessPaidOrder(
 		order.PublicID,
 	)
 
-	// ========================================================
-	// SEND TICKETS EMAIL AFTER COMMIT
-	// ========================================================
-
-	if err := s.sendOrderTicketsEmail(
-		ctx,
-		order,
-		orderTickets,
-	); err != nil {
-		log.Printf(
-			"⚠️ Ticket email delivery failed for order %s: %v",
-			order.PublicID,
-			err,
-		)
-	} else {
-		log.Printf("📧 Ticket email accepted by SMTP for order %s", order.PublicID)
-	}
-
 	return nil
-}
-
-func (s *PaymentService) sendOrderTicketsEmail(
-	ctx context.Context,
-	order *entities.Order,
-	orderTickets []*entities.Ticket,
-) error {
-	if s.emailClient == nil {
-		return fmt.Errorf("email client is not configured")
-	}
-
-	if order == nil {
-		return fmt.Errorf("order is nil")
-	}
-
-	if order.CustomerEmail == "" {
-		return fmt.Errorf(
-			"order %s has no customer email",
-			order.PublicID,
-		)
-	}
-
-	if len(orderTickets) == 0 {
-		return fmt.Errorf(
-			"order %s has no tickets to email",
-			order.PublicID,
-		)
-	}
-
-	customerName := "Cliente osmi"
-
-	if order.CustomerName != nil &&
-		*order.CustomerName != "" {
-		customerName = *order.CustomerName
-	}
-
-	emailTickets := make(
-		[]email.TicketEmailItem,
-		0,
-		len(orderTickets),
-	)
-
-	for _, ticket := range orderTickets {
-		if ticket == nil {
-			return fmt.Errorf(
-				"order %s contains a nil ticket",
-				order.PublicID,
-			)
-		}
-
-		if ticket.Status != "sold" {
-			return fmt.Errorf(
-				"ticket %s is not sold; current status: %s",
-				ticket.PublicID,
-				ticket.Status,
-			)
-		}
-
-		if ticket.Code == "" {
-			return fmt.Errorf(
-				"ticket %s has empty code",
-				ticket.PublicID,
-			)
-		}
-
-		ticketType, err := s.ticketTypeRepo.FindByID(
-			ctx,
-			ticket.TicketTypeID,
-		)
-		if err != nil {
-			return fmt.Errorf(
-				"failed to load ticket type %d for ticket %s: %w",
-				ticket.TicketTypeID,
-				ticket.PublicID,
-				err,
-			)
-		}
-
-		if ticketType == nil {
-			return fmt.Errorf(
-				"ticket type %d not found for ticket %s",
-				ticket.TicketTypeID,
-				ticket.PublicID,
-			)
-		}
-
-		event, err := s.eventRepo.GetByID(
-			ctx,
-			ticket.EventID,
-		)
-		if err != nil {
-			return fmt.Errorf(
-				"failed to load event %d for ticket %s: %w",
-				ticket.EventID,
-				ticket.PublicID,
-				err,
-			)
-		}
-
-		if event == nil {
-			return fmt.Errorf(
-				"event %d not found for ticket %s",
-				ticket.EventID,
-				ticket.PublicID,
-			)
-		}
-
-		eventLocation := ""
-
-		if event.VenueName != nil {
-			eventLocation = *event.VenueName
-		}
-
-		if ticket.QRCodeData == nil || strings.TrimSpace(*ticket.QRCodeData) == "" {
-			return fmt.Errorf(
-				"ticket %s has no QR credential",
-				ticket.PublicID,
-			)
-		}
-
-		qrBase64, err := qr.GenerateQRBase64(
-			*ticket.QRCodeData,
-		)
-		if err != nil {
-			return fmt.Errorf(
-				"failed to generate QR for ticket %s: %w",
-				ticket.PublicID,
-				err,
-			)
-		}
-
-		emailTickets = append(
-			emailTickets,
-			email.TicketEmailItem{
-				TicketCode:     ticket.Code,
-				TicketTypeName: ticketType.Name,
-				EventName:      event.Name,
-				EventDate: event.StartsAt.Format(
-					"02/01/2006 15:04",
-				),
-				EventLocation: eventLocation,
-				QRBase64:      qrBase64,
-			},
-		)
-	}
-
-	return s.emailClient.SendOrderTicketsEmail(
-		order.CustomerEmail,
-		customerName,
-		order.PublicID,
-		emailTickets,
-	)
 }
 
 func (s *PaymentService) CreatePaymentIntent(

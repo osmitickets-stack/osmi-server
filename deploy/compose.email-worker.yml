@@ -1,0 +1,30 @@
+services:
+  email-worker:
+    image: "${OSMI_EMAIL_IMAGE:?set a verified ghcr.io digest}"
+    container_name: osmi-email-worker
+    restart: unless-stopped
+    env_file:
+      - /opt/osmi/.env.production
+    environment:
+      SMTP_FROM: boletos@myosmi.com
+      SMTP_REPLY_TO: "${OSMI_EMAIL_REPLY_TO:?set the monitored reply-to mailbox}"
+      SES_CONFIGURATION_SET: osmi-transactional-prod
+      SES_EVENTS_QUEUE_URL: "${SES_EVENTS_QUEUE_URL:?set the CloudFormation queue URL}"
+      AWS_REGION: us-east-1
+    entrypoint: ["/app/email-worker"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/app/email-worker", "--health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - application
+      - data
