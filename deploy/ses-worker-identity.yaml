@@ -1,0 +1,30 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Dedicated EC2 identity for the OSMI transactional email worker. Does not associate the profile with an instance.
+
+Resources:
+  EmailWorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: osmi-transactional-email-worker
+      Description: Receives and acknowledges SES feedback from the dedicated SQS queue.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/osmi-transactional-feedback-consumer'
+
+  EmailWorkerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: osmi-transactional-email-worker
+      Roles: [!Ref EmailWorkerRole]
+
+Outputs:
+  InstanceProfileName:
+    Value: !Ref EmailWorkerInstanceProfile
+  RoleName:
+    Value: !Ref EmailWorkerRole

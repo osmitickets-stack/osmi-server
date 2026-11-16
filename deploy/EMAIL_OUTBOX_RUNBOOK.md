@@ -9,6 +9,7 @@
 - El configuration set `osmi-transactional-prod` y la identidad `myosmi.com` permanecen activos en `us-east-1`.
 - La plantilla `ses-feedback.yaml` se valida como cambio de CloudFormation antes de ejecutarse. Confirmar la suscripción del buzón de alarmas.
 - La plantilla SES/SQS crea `WorkerSqsPolicy` sin adjuntarla; no crea, modifica ni reemplaza roles o perfiles IAM de EC2. Antes de habilitar el Worker, comprobar el estado real del perfil asociado a `osmi-api-prod` y las dependencias de respaldo. Adjuntar la política a un rol operativo verificado mediante un cambio separado y revisar IMDSv2 para contenedores. Detener el despliegue si no hay credenciales de rol funcionales.
+- `ses-worker-identity.yaml` prepara un rol EC2 limitado a la política SQS y un perfil nuevo, sin asociarlo a la instancia. Crear y revisar su change set solo tras verificar el stack SES/SQS, el perfil que aparece en EC2, los metadatos IAM y las dependencias operativas. La copia externa por SCP/SFTP no usa IAM. Asociar el perfil exige una operación posterior y una comprobación de reversión; no reutilizar el nombre de un perfil eliminado.
 - El Worker debe poder resolver SQS y SES por la red `application` y PostgreSQL por `data`. La cola URL y el Reply-To supervisado se suministran en la terminal privada de EC2, sin publicarlos en Git.
 
 ## Secuencia de publicación
