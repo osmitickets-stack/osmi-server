@@ -12,6 +12,25 @@ Estado: guard IMDS instalado con autorización limitada; demás etapas pendiente
 
 ## Matriz de cambios previstos
 
+### Diferencias confirmadas entre producción, GitHub y ramas locales
+
+| Componente | Producción observada | GitHub / local | Diferencia y decisión |
+| --- | --- | --- | --- |
+| Server | Contenedor saludable con revisión `e56c358`, imagen `sha256:8a99838e...` | `main=3e20681`; PR #11 borrador `ecdcc7e` | Producción carece de Outbox y SES API. `main` ya integró Outbox y la plantilla V3; el PR agrega SES API/IMDS. No publicar la rama borrador como imagen final sin integrar y probar el `main` actual. |
+| PostgreSQL / osmi-db | `schema_migrations=13`, `dirty=false` | `main=69a7c24` contiene migración 14; la rama local `00d638c` está detrás de `main` | Aplicar solo migración 14 desde imagen verificada, con respaldo y restauración aislada. No fusionar ni desplegar de nuevo la rama antigua ni copiar migraciones a mano. |
+| Frontend | Vercel Production READY de `bdae844`, alias `www.myosmi.com` | Rama limpia `fix/purchase-email-experience=d004bd3`, tres archivos sobre ese `main` | Checkout, confirmación y enlaces del Footer pendientes. Publicar separadamente tras build y E2E, con rollback de Vercel. No copiar a EC2. |
+| Guard IMDS | Tabla nft y drop-in activos; servicio del guard activo, timer automático deshabilitado | Paquetes versionados `33d7905` y `b4069e7`; runbook en PR #11 | Archivos del guard ya instalados y hashes verificados. Falta prueba de persistencia tras reinicio autorizado, antes de asociar IAM. |
+| Email Worker | Ausente | Código y `deploy/compose.email-worker.yml` solo en PR #11 | Crear solo el archivo nuevo tras comparar rutas; iniciar solo servicio nuevo cuando IAM, SQS, migración e imagen final estén listos. |
+| Gateway, Worker de reservas, Redis, Nginx | En ejecución; Worker de reservas con cero reinicios | Sin cambios necesarios para esta prioridad | No recrear ni desplegar. Los seis IDs existentes permanecieron iguales tras activar el guard. |
+
+La rama local principal de Server `feat/scanner-events` y el checkout local de Front `feat/scanner-web` tienen cambios sin confirmar ajenos a esta prioridad. No incluirlos en artefactos ni sincronizar esos directorios. Los PR borradores de QR/Gateway quedan fuera del despliegue de correo.
+
+En EC2 ya existen `docker-compose.yml`, `deploy/compose.checkin-prod.yml`, `deploy/compose.checkin-images.yml`, `deploy/compose.ses-release.yml` y `deploy/compose.ses-rollback.yml`; se registraron sus SHA-256 sin leer valores. Conservarlos y crear solo archivos nuevos necesarios, después de comprobar ausencia/diferencia. `deploy/compose.email-worker.yml` está ausente. Los hashes de `imds-email-worker.nft`, `ensure-imds-email-guard.sh` y `rollback-imds-email-guard.sh` coinciden con los archivos versionados instalados. No sobrescribir los overrides SES existentes ni usar una sincronización de carpetas.
+
+El change set V3 de CloudFormation propone 15 recursos sin rol ni perfil y no se ejecutó. `ses-worker-identity.yaml` prepara el perfil IAM por separado. Falta comprobar en AWS que V3 y sus nombres siguen sin conflictos justo antes de ejecutarlo. El perfil residual `osmi-qr-backup-once` aparece asociado en EC2 pero fue eliminado en IAM; IMDS devolvió 404 antes del guard. El rollback IAM sería desasociar el perfil nuevo y mantener SMTP, nunca restaurar un perfil inexistente.
+
+Antes de cualquier migración o reinicio, comprobar respaldo nuevo, SHA-256, copia externa por SCP/SFTP y restauración aislada del respaldo concreto. El respaldo local `BACKUP_LOCAL_OK` anterior no basta por sí solo para ese punto de control.
+
 | Etapa | Destino | Acción prevista | Condición |
 | --- | --- | --- | --- |
 | Guard, reversión primero | `/opt/osmi/deploy/rollback-imds-email-guard.sh`, `/etc/systemd/system/osmi-email-imds-rollback.{service,timer}` | Crear tres archivos nuevos desde el paquete `b4069e7` | SHA-256 y lista del paquete verificados en EC2; destinos libres. |
