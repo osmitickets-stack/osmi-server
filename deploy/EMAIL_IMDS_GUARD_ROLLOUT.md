@@ -76,9 +76,16 @@ Instalar **primero** la reversión y armar el timer. Si `systemctl list-timers` 
 ```bash
 set -euo pipefail
 stage="$HOME/osmi-email-imds-rollback-b4069e7-stage"
-sudo install -o root -g root -m 0644 "$stage/deploy/rollback-imds-email-guard.sh" /opt/osmi/deploy/rollback-imds-email-guard.sh
-sudo install -o root -g root -m 0644 "$stage/deploy/systemd/osmi-email-imds-rollback.service" /etc/systemd/system/osmi-email-imds-rollback.service
-sudo install -o root -g root -m 0644 "$stage/deploy/systemd/osmi-email-imds-rollback.timer" /etc/systemd/system/osmi-email-imds-rollback.timer
+for pair in \
+  "$stage/deploy/rollback-imds-email-guard.sh:/opt/osmi/deploy/rollback-imds-email-guard.sh" \
+  "$stage/deploy/systemd/osmi-email-imds-rollback.service:/etc/systemd/system/osmi-email-imds-rollback.service" \
+  "$stage/deploy/systemd/osmi-email-imds-rollback.timer:/etc/systemd/system/osmi-email-imds-rollback.timer"; do
+  src="${pair%%:*}"; dest="${pair#*:}"
+  [ ! -e "$dest" ] && [ ! -L "$dest" ] || { echo DESTINO_OCUPADO; exit 1; }
+  sudo cp --no-clobber -- "$src" "$dest"
+  [ "$(sha256sum "$src" | cut -d' ' -f1)" = "$(sudo sha256sum "$dest" | cut -d' ' -f1)" ] || { echo COPIA_FALLO; exit 1; }
+  sudo chown root:root "$dest"; sudo chmod 0644 "$dest"
+done
 sudo systemctl daemon-reload
 sudo systemctl enable --now osmi-email-imds-rollback.timer
 [ "$(systemctl is-active osmi-email-imds-rollback.timer)" = active ]
@@ -93,9 +100,16 @@ set -euo pipefail
 stage="$HOME/osmi-email-imds-33d7905-stage"
 sudo systemctl restart osmi-email-imds-rollback.timer
 [ "$(systemctl is-active osmi-email-imds-rollback.timer)" = active ]
-sudo install -o root -g root -m 0644 "$stage/deploy/imds-email-worker.nft" /opt/osmi/deploy/imds-email-worker.nft
-sudo install -o root -g root -m 0644 "$stage/deploy/ensure-imds-email-guard.sh" /opt/osmi/deploy/ensure-imds-email-guard.sh
-sudo install -o root -g root -m 0644 "$stage/deploy/systemd/osmi-email-imds-guard.service" /etc/systemd/system/osmi-email-imds-guard.service
+for pair in \
+  "$stage/deploy/imds-email-worker.nft:/opt/osmi/deploy/imds-email-worker.nft" \
+  "$stage/deploy/ensure-imds-email-guard.sh:/opt/osmi/deploy/ensure-imds-email-guard.sh" \
+  "$stage/deploy/systemd/osmi-email-imds-guard.service:/etc/systemd/system/osmi-email-imds-guard.service"; do
+  src="${pair%%:*}"; dest="${pair#*:}"
+  [ ! -e "$dest" ] && [ ! -L "$dest" ] || { echo DESTINO_OCUPADO; exit 1; }
+  sudo cp --no-clobber -- "$src" "$dest"
+  [ "$(sha256sum "$src" | cut -d' ' -f1)" = "$(sudo sha256sum "$dest" | cut -d' ' -f1)" ] || { echo COPIA_FALLO; exit 1; }
+  sudo chown root:root "$dest"; sudo chmod 0644 "$dest"
+done
 sudo systemctl daemon-reload
 sudo systemctl start osmi-email-imds-guard.service
 [ "$(systemctl is-active osmi-email-imds-guard.service)" = active ]
@@ -128,7 +142,12 @@ Solo con ese resultado, instalar el drop-in y comprobar las dependencias efectiv
 set -euo pipefail
 stage="$HOME/osmi-email-imds-33d7905-stage"
 [ "$(systemctl is-active osmi-email-imds-rollback.timer)" = active ]
-sudo install -D -o root -g root -m 0644 "$stage/deploy/systemd/docker-imds-guard.conf" /etc/systemd/system/docker.service.d/90-osmi-email-imds-guard.conf
+dest=/etc/systemd/system/docker.service.d/90-osmi-email-imds-guard.conf
+[ ! -e "$dest" ] && [ ! -L "$dest" ] || { echo DESTINO_OCUPADO; exit 1; }
+sudo mkdir -p /etc/systemd/system/docker.service.d
+sudo cp --no-clobber -- "$stage/deploy/systemd/docker-imds-guard.conf" "$dest"
+[ "$(sha256sum "$stage/deploy/systemd/docker-imds-guard.conf" | cut -d' ' -f1)" = "$(sudo sha256sum "$dest" | cut -d' ' -f1)" ] || { echo COPIA_FALLO; exit 1; }
+sudo chown root:root "$dest"; sudo chmod 0644 "$dest"
 sudo systemctl daemon-reload
 sudo systemd-analyze verify docker.service osmi-email-imds-guard.service
 systemctl show docker.service -p Requires | grep -Fq osmi-email-imds-guard.service
