@@ -7,8 +7,8 @@ Estado: preparación local. Ningún paso de este documento autoriza cambios en p
 - El PR #11 sigue en borrador. Su CI pasó en `1d8bec6`; la imagen de GHCR de ese commit **no está publicada** por la CI del PR. `.github/workflows/docker.yml` publica en `main` y una ejecución manual desde la rama podría actualizar `latest`; no usar ese workflow manualmente para el candidato.
 - La imagen actual de Server observada en EC2 era `e56c3586db0aa6e1e16d5f8aa00b6690c1621efd`, saludable. Reconfirmar revisión, ID, salud e IDs de todos los contenedores justo antes de cada etapa.
 - La base productiva estaba en migración `13|f`. Hay un respaldo local privado marcado `BACKUP_LOCAL_OK`, pero antes de migrar se requieren comprobación de hash, copia externa y restauración aislada de ese respaldo concreto.
-- El guard `33d7905` se validó en un staging privado de EC2. El paquete de rollback `b4069e7` sigue local. Reconfirmar que las siete rutas de instalación no existen y que la tabla nft de OSMI está ausente. Si alguna ruta existe, detenerse y comparar tipo, dueño, permisos y SHA-256 antes de decidir; no sobrescribir.
-- Falta una instantánea actual de solo lectura de los archivos y servicios de EC2. Sin ella no puede afirmarse que el contenido local coincide con la configuración productiva.
+- El guard `33d7905` se validó en un staging privado de EC2. En la instantánea de solo lectura posterior, las siete rutas de instalación seguían libres y la tabla nft de OSMI estaba ausente. El paquete de rollback `b4069e7` todavía no estaba en EC2; su traslado y validación privados se autorizaron por separado. Reconfirmar inmediatamente antes de instalar. Si alguna ruta aparece, detenerse y comparar tipo, dueño, permisos y SHA-256; no sobrescribir.
+- La instantánea de solo lectura confirmó Docker activo; Server, Gateway, PostgreSQL, Redis y Nginx `running/healthy`; Worker de reservas `running` con cero reinicios. Se registraron sus IDs e imágenes fuera del repositorio para comparar cada etapa. Esta instantánea no demuestra la configuración efectiva de Compose ni reemplaza el preflight justo antes de un cambio.
 
 ## Matriz de cambios previstos
 
