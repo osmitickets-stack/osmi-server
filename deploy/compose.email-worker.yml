@@ -11,10 +11,6 @@ services:
       DB_PASSWORD: "${DB_PASSWORD:-}"
       DB_NAME: "${DB_NAME:-}"
       DB_SSLMODE: "${DB_SSLMODE:-disable}"
-      SMTP_HOST: "${SMTP_HOST:?set the SES SMTP endpoint}"
-      SMTP_PORT: "${SMTP_PORT:-587}"
-      SMTP_USERNAME: "${SMTP_USERNAME:?set the SES SMTP user}"
-      SMTP_PASSWORD: "${SMTP_PASSWORD:?set the SES SMTP password}"
       SMTP_FROM: boletos@myosmi.com
       SMTP_REPLY_TO: "${OSMI_EMAIL_REPLY_TO:?set the monitored reply-to mailbox}"
       SES_CONFIGURATION_SET: osmi-transactional-prod
@@ -36,5 +32,13 @@ services:
       retries: 3
       start_period: 60s
     networks:
-      - application
+      - email_egress
       - data
+
+networks:
+  email_egress:
+    name: osmi-email-egress
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: br-osmi-email

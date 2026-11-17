@@ -1,0 +1,9 @@
+# Load this before Docker can start containers, after reviewing the host's
+# existing nftables rules. Do not flush any other table.
+table inet osmi_email_imds {
+    chain deny_other_containers {
+        type filter hook forward priority -10; policy accept;
+        ip daddr 169.254.169.254 iifname != "br-osmi-email" drop
+        ip6 daddr fd00:ec2::254 iifname != "br-osmi-email" drop
+    }
+}
