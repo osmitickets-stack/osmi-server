@@ -91,6 +91,7 @@ Instalar el guard del paquete previamente validado y activarlo **sin reiniciar D
 ```bash
 set -euo pipefail
 stage="$HOME/osmi-email-imds-33d7905-stage"
+sudo systemctl restart osmi-email-imds-rollback.timer
 [ "$(systemctl is-active osmi-email-imds-rollback.timer)" = active ]
 sudo install -o root -g root -m 0644 "$stage/deploy/imds-email-worker.nft" /opt/osmi/deploy/imds-email-worker.nft
 sudo install -o root -g root -m 0644 "$stage/deploy/ensure-imds-email-guard.sh" /opt/osmi/deploy/ensure-imds-email-guard.sh
