@@ -14,7 +14,7 @@ import (
 )
 
 type TicketEmailSender interface {
-	SendOrderTicketsEmailWithAttempt(string, string, string, []TicketEmailItem, uuid.UUID) error
+	SendOrderTicketsEmailWithAttempt(string, string, string, []TicketEmailItem, uuid.UUID) (string, error)
 }
 
 var ErrTicketEmailNotEligible = errors.New("paid order is not eligible for ticket email")
@@ -65,13 +65,14 @@ func (d *TicketEmailDispatcher) ProcessOne(ctx context.Context) (bool, error) {
 		}
 		return true, fmt.Errorf("ticket email job %d suppressed", job.ID)
 	}
-	if err := d.sender.SendOrderTicketsEmailWithAttempt(recipient, name, orderUUID, tickets, job.AttemptID); err != nil {
-		if markErr := d.outbox.MarkFailure(ctx, job, "smtp_send_failed"); markErr != nil {
+	messageID, err := d.sender.SendOrderTicketsEmailWithAttempt(recipient, name, orderUUID, tickets, job.AttemptID)
+	if err != nil {
+		if markErr := d.outbox.MarkFailure(ctx, job, "email_send_failed"); markErr != nil {
 			return true, fmt.Errorf("ticket email job %d retry scheduling failed: %w", job.ID, markErr)
 		}
 		return true, fmt.Errorf("ticket email job %d scheduled for retry", job.ID)
 	}
-	if err := d.outbox.MarkAccepted(ctx, job); err != nil {
+	if err := d.outbox.MarkAccepted(ctx, job, messageID); err != nil {
 		return true, fmt.Errorf("ticket email job %d acceptance recording failed: %w", job.ID, err)
 	}
 	return true, nil
