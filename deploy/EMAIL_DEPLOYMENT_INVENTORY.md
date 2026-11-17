@@ -1,14 +1,14 @@
 # Inventario previo al despliegue de correo transaccional
 
-Estado: preparación local. Ningún paso de este documento autoriza cambios en producción.
+Estado: guard IMDS instalado con autorización limitada; demás etapas pendientes. Ningún paso de este documento autoriza cambios adicionales en producción.
 
 ## Evidencia y datos que todavía faltan
 
 - El PR #11 sigue en borrador. Su CI pasó en `1d8bec6`; la imagen de GHCR de ese commit **no está publicada** por la CI del PR. `.github/workflows/docker.yml` publica en `main` y una ejecución manual desde la rama podría actualizar `latest`; no usar ese workflow manualmente para el candidato.
 - La imagen actual de Server observada en EC2 era `e56c3586db0aa6e1e16d5f8aa00b6690c1621efd`, saludable. Reconfirmar revisión, ID, salud e IDs de todos los contenedores justo antes de cada etapa.
 - La base productiva estaba en migración `13|f`. Hay un respaldo local privado marcado `BACKUP_LOCAL_OK`, pero antes de migrar se requieren comprobación de hash, copia externa y restauración aislada de ese respaldo concreto.
-- El guard `33d7905` se validó en un staging privado de EC2. En la instantánea de solo lectura posterior, las siete rutas de instalación seguían libres y la tabla nft de OSMI estaba ausente. El paquete de rollback `b4069e7` se copió después al HOME privado de `ubuntu` con autorización limitada; SHA-256, contenido, `sh -n` y `systemd-analyze verify` pasaron allí. Ninguna unidad, timer, regla o drop-in se instaló. Reconfirmar destinos y estado inmediatamente antes de instalar. Si alguna ruta aparece, detenerse y comparar tipo, dueño, permisos y SHA-256; no sobrescribir.
-- La instantánea de solo lectura confirmó Docker activo; Server, Gateway, PostgreSQL, Redis y Nginx `running/healthy`; Worker de reservas `running` con cero reinicios. Se registraron sus IDs e imágenes fuera del repositorio para comparar cada etapa. Esta instantánea no demuestra la configuración efectiva de Compose ni reemplaza el preflight justo antes de un cambio.
+- El guard `33d7905` y el rollback `b4069e7` pasaron validación SHA-256, contenido y sintaxis en staging privado. Después se instalaron únicamente sus siete archivos nuevos con autorización específica y hashes comprobados; la tabla `inet osmi_email_imds` y el drop-in están activos. El timer automático se probó con disparo real antes de aplicar el guard, se rearmó para la instalación y quedó deshabilitado tras la verificación final. Los destinos ahora están ocupados por esos archivos aprobados; cualquier cambio futuro exige comparar sus hashes y permisos, nunca sobrescribirlos por rutina.
+- La instantánea y la verificación posterior al guard confirmaron Docker activo; Server, Gateway, PostgreSQL, Redis y Nginx `running/healthy`; Worker de reservas `running` con cero reinicios. Los seis IDs de contenedor permanecieron iguales. API de origen y sitio público respondieron 200. La prueba TCP desde los seis contenedores confirmó bloqueo de IMDS; PostgreSQL y Redis ya estaban bloqueados en la línea base. Esto no demuestra persistencia tras reinicio ni la futura excepción del Email Worker.
 
 ## Matriz de cambios previstos
 

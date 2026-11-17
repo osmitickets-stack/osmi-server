@@ -1,6 +1,8 @@
 # Entrega revisable del guard IMDS para Email Worker
 
-Estado: **preparado en Git; no instalado en EC2**. Requiere una ventana y autorización explícita antes de copiar archivos, instalar unidades, reiniciar servicios o cambiar IAM.
+Estado: **guard instalado y verificado en EC2; persistencia tras reinicio aún no probada**. La instalación inicial se hizo con autorización limitada, sin reiniciar Docker ni EC2 y sin cambiar IAM. El timer de rollback quedó deshabilitado tras los PASS. Cualquier reinicio, asociación IAM o despliegue adicional requiere autorización separada.
+
+Evidencia de la instalación: preflight PASS; servicio de rollback `success/0`; timer `active/enabled` y disparo automático comprobado después de cerrar SSH mientras el guard aún no existía; tras ese disparo Docker, Server, Gateway y API siguieron sanos. El timer se rearmó antes de activar nft. El guard y su verificador pasaron; los seis contenedores no alcanzaron IMDS por TCP; Server, Gateway, PostgreSQL, Redis, Nginx, Worker de reservas, API y sitio público siguieron operando. Los seis IDs de contenedor quedaron iguales. El drop-in pasó verificación de dependencias tras `daemon-reload`; no se reinició Docker. Estado final confirmado: `GUARD_INSTALADO_TIMER_DESARMADO`. No se ejecutó una reversión del guard activo; esa ruta se probó localmente y el servicio/timer reales se ejercitaron antes de instalar reglas. Revalidar toda esta evidencia antes de IAM.
 
 ## Evidencia y límite de seguridad
 
@@ -18,7 +20,7 @@ Estado: **preparado en Git; no instalado en EC2**. Requiere una ventana y autori
 
 ## Reversión independiente de SSH
 
-El segundo artefacto local es `C:\Users\silen\Desktop\Servidor\release-candidates\osmi-email-imds-rollback-b4069e7.tar.gz`, generado del commit `b4069e7`. Contiene solo `deploy/rollback-imds-email-guard.sh`, `deploy/systemd/osmi-email-imds-rollback.service` y `deploy/systemd/osmi-email-imds-rollback.timer`, más las entradas de directorio. Su SHA-256 es `4ff1625e997c1261712b9dde1b7cc0c0bdc814ac27edf56533cba68c591d914a`. No se ha copiado a EC2.
+El segundo artefacto local es `C:\Users\silen\Desktop\Servidor\release-candidates\osmi-email-imds-rollback-b4069e7.tar.gz`, generado del commit `b4069e7`. Contiene solo `deploy/rollback-imds-email-guard.sh`, `deploy/systemd/osmi-email-imds-rollback.service` y `deploy/systemd/osmi-email-imds-rollback.timer`, más las entradas de directorio. Su SHA-256 es `4ff1625e997c1261712b9dde1b7cc0c0bdc814ac27edf56533cba68c591d914a`. Se copió al HOME privado de EC2, se validó allí y se instalaron sus tres archivos sin sobrescribir destinos.
 
 El guard **no se instalará** sin preparar antes `rollback-imds-email-guard.sh`, `osmi-email-imds-rollback.service` y `osmi-email-imds-rollback.timer`. El timer se habilita y arranca antes de aplicar la tabla nft. `OnActiveSec=15min` cuenta desde su activación; al estar habilitado, si la instancia reinicia durante la ventana, comienza una nueva ventana al arrancar. Se eligió `OnActiveSec` porque `OnBootSec` podría dispararse de inmediato en una instancia que ya lleva más tiempo encendida. [Comportamiento de systemd.timer](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html).
 
