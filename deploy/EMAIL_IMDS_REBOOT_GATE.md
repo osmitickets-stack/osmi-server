@@ -1,13 +1,13 @@
 # Punto de control: persistencia del guard tras reiniciar EC2
 
-Estado: **preparado; reinicio no autorizado ni ejecutado**. Este documento no autoriza crear respaldos, snapshots, reiniciar EC2 ni cambiar IAM. El guard y el drop-in están instalados, el timer de rollback está deshabilitado y la instancia no tiene credenciales de rol utilizables.
+Estado: **preparado; reinicio no autorizado ni ejecutado**. El guard y el drop-in están instalados, el timer de rollback está deshabilitado y la instancia no tiene credenciales de rol utilizables. El respaldo nuevo previo a la migración 14 ya se validó; no repetirlo durante esta ventana.
 
 ## Condiciones antes de solicitar el reinicio
 
 1. Registrar la revisión, ID y salud de Server y los IDs/estados de Gateway, Worker de reservas, PostgreSQL, Redis y Nginx. Confirmar API de origen y sitio público HTTP 200, `pg_isready` y cero reinicios del Worker de reservas. Confirmar `schema_migrations=13|false`; no aplicar migración 14 durante esta ventana.
 2. Confirmar `osmi-email-imds-guard.service=active`, `docker.service=active`, `osmi-email-imds-rollback.timer=disabled/inactive`, `ensure-imds-email-guard.sh check` PASS y que las reglas nft solo pertenecen a `inet osmi_email_imds`. Confirmar IMDSv2 obligatorio, IAM sin credenciales (ruta de nombres de rol HTTP 404) y que los seis contenedores no alcanzan IMDS por TCP. No imprimir tokens ni nombres de rol.
 3. Comprobar los hashes de los siete archivos instalados contra los paquetes `33d7905` y `b4069e7`; detenerse ante cualquier diferencia. Conservar ambos paquetes privados de staging. No sobrescribir Compose, unidades base ni `/etc/nftables.conf`.
-4. Antes del reinicio autorizado, obtener un **respaldo PostgreSQL nuevo** en formato custom bajo un nombre único, verificar `pg_restore -l` y SHA-256, copiarlo por SCP/SFTP fuera de EC2 y comprobar allí el mismo hash. Restaurarlo en una base **aislada** y verificar versión y marcador de aislamiento antes de considerar el respaldo utilizable. No ejecutar `pg_restore` sobre `osmidb`. El respaldo anterior `BACKUP_LOCAL_OK` no prueba por sí solo que la copia externa actual esté íntegra.
+4. Respaldo previo completado: `BACKUP_EC2_OK`, `BACKUP_LOCAL_OK`, `BACKUP_SHA_MATCH` y `RESTORE_ISOLATED_PASS`. El archivo nuevo en formato custom se verificó con SHA-256 y `pg_restore -l`; la copia externa tuvo el mismo SHA-256 y se restauró por completo en Docker Desktop, en una base nueva dentro de un contenedor sin red ni volúmenes del host. Se verificó `schema_migrations=13|false` y la presencia de tablas. Conservar ambas copias; no restaurar sobre `osmidb` ni repetir el respaldo sin un motivo técnico concreto.
 5. Preparar recuperación del host: registrar volumen raíz y método de acceso a EC2 desde consola AWS; si se aprueba un snapshot EBS, crear/verificarlo antes del reinicio y registrar su ID fuera del repositorio. El timer depende de que EC2 y systemd arranquen: no recupera un host que no inicia. La creación de snapshot y el reinicio son operaciones productivas con autorización separada.
 
 ## Ventana de reinicio, solo tras autorización
