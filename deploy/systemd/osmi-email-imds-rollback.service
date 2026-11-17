@@ -1,0 +1,9 @@
+[Unit]
+Description=Restore Docker operation if OSMI IMDS guard rollout fails
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/osmi/deploy/rollback-imds-email-guard.sh
+TimeoutStartSec=60s
