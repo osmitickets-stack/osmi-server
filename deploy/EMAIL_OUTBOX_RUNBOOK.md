@@ -21,6 +21,7 @@
 5. Publicar el frontend cuando pase build. Su checkout ya no consulta ni crea clientes por correo; el servidor liga cuentas autenticadas y deja las compras invitadas sin cuenta. Comprobar los PDF de términos y privacidad por GET directo.
 6. Hacer **una** compra de prueba con cuenta registrada y buzón externo autorizado. Confirmar orden completada, boleto en «Mis boletos», un solo job de correo `delivered`, intento con ID SES, email en Principal/Promociones/Spam, SPF/DKIM/DMARC y QR renderizado en el correo. No realizar check-in ni repetir un pago lento.
 7. Probar SES mailbox simulator desde la consola con mensaje sin datos comerciales: success, bounce, complaint y suppression-list. Confirmar métricas y tránsito SNS/SQS; esos mensajes no llevan `osmi_attempt_id` y no alteran jobs comerciales. Las transiciones de jobs se prueban en PostgreSQL aislado. Comprobar alarmas de rebote, queja, edad de cola y DLQ.
+8. Solo después de observar SES API + Worker + SQS + entrega real, verificar que ningún otro flujo Server usa SMTP y retirar las credenciales SMTP persistentes del entorno comercial con un cambio controlado. Conservar la imagen anterior como reversión durante la ventana acordada; el retiro definitivo de esas credenciales exige una estrategia de reversión que no las reintroduzca.
 
 ## Controles de operación y reversión
 
