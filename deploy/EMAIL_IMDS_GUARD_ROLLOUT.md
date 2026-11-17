@@ -22,6 +22,8 @@ El segundo artefacto local es `C:\Users\silen\Desktop\Servidor\release-candidate
 
 El guard **no se instalará** sin preparar antes `rollback-imds-email-guard.sh`, `osmi-email-imds-rollback.service` y `osmi-email-imds-rollback.timer`. El timer se habilita y arranca antes de aplicar la tabla nft. `OnActiveSec=15min` cuenta desde su activación; al estar habilitado, si la instancia reinicia durante la ventana, comienza una nueva ventana al arrancar. Se eligió `OnActiveSec` porque `OnBootSec` podría dispararse de inmediato en una instancia que ya lleva más tiempo encendida. [Comportamiento de systemd.timer](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html).
 
+`OnActiveSec` es monotónico: `NextElapseUSecRealtime` puede estar vacío aun con el timer programado. Verificar `ActiveState=active`, `UnitFileState=enabled`, `NextElapseUSecMonotonic` y la columna `LEFT` de `systemctl list-timers --all`; no tratar un valor de tiempo real vacío como fallo. Antes de instalar el guard, dejar disparar una vez el timer con las rutas del guard todavía ausentes, cerrar SSH durante la espera y después comprobar `LastTriggerUSecMonotonic` distinto de cero, `Result=success`, `ExecMainStatus=0`, Docker activo y API sana. Así se prueba la ruta automática real sin quitar reglas en uso. Rearmar el timer inmediatamente antes de activar el guard.
+
 El servicio de reversión corre bajo systemd, no bajo la sesión SSH. Comprueba por IMDSv2, sin imprimir ningún token ni nombre de rol, que la ruta de credenciales siga en 404. Comprueba también que cualquier archivo del guard presente coincide con el SHA-256 versionado. Si hay credenciales, el estado IAM es incierto o algún archivo cambió, **deja el guard colocado** y falla cerrado. Si sigue sin credenciales, retira primero el drop-in de Docker, recarga systemd, detiene la unidad, elimina solo la tabla `inet osmi_email_imds` y los archivos propios, y arranca Docker únicamente si estaba inactivo. No vacía otras tablas ni reinicia un Docker sano.
 
 Antes de aplicar el filtro se verificará `rollback.timer` activo y su próxima ejecución. Si falla cualquier comprobación, se puede ejecutar el servicio de reversión manualmente; si se pierde SSH, el timer lo ejecuta en 15 minutos. Tras verificar la instalación, deshabilitar y detener el timer. Para la prueba autorizada de reinicio se vuelve a habilitar **antes** de reiniciar y se deshabilita solo tras confirmar el arranque. El timer debe estar deshabilitado antes de cualquier cambio IAM. Esta protección exige que systemd y la propia EC2 sigan operativos; no sustituye un plan de recuperación de la instancia desde la consola AWS si el sistema no arranca.
@@ -100,6 +102,9 @@ set -euo pipefail
 stage="$HOME/osmi-email-imds-33d7905-stage"
 sudo systemctl restart osmi-email-imds-rollback.timer
 [ "$(systemctl is-active osmi-email-imds-rollback.timer)" = active ]
+next="$(systemctl show --value -p NextElapseUSecMonotonic osmi-email-imds-rollback.timer)"
+case "$next" in ""|0|n/a) echo TIMER_SIN_DISPARO; exit 1;; esac
+systemctl list-timers --all --no-pager osmi-email-imds-rollback.timer
 for pair in \
   "$stage/deploy/imds-email-worker.nft:/opt/osmi/deploy/imds-email-worker.nft" \
   "$stage/deploy/ensure-imds-email-guard.sh:/opt/osmi/deploy/ensure-imds-email-guard.sh" \
