@@ -1,11 +1,11 @@
 # Identidad IAM del Email Worker en la EC2 actual
 
-Estado: **preparado para revisión; ningún rol nuevo está asociado a EC2**. Esta guía no autoriza cambios en producción.
+Estado: **stack de identidad creado y perfil nuevo asociado a `osmi-api-prod` con autorización**. La confianza, políticas, simulación IAM, guard IMDS, seis contenedores y servicios pasaron. Falta comprobar la obtención de credenciales temporales dentro del Email Worker. Esta guía no autoriza cambios adicionales en producción.
 
 ## Dependencias comprobadas
 
 - El guard IMDS persistió tras el reinicio controlado: `GUARD_REBOOT_CHECK_PASS` y `GUARD_REBOOT_PASS_TIMER_DESARMADO`. Los seis contenedores existentes no alcanzaron IMDS; Server, Gateway, PostgreSQL, Redis y Nginx conservaron salud y la API y el sitio respondieron HTTP 200.
-- CloudFormation V3 creó 15 recursos (`CREATE_COMPLETE`), incluida la política `osmi-transactional-feedback-consumer`. La suscripción SQS usa entrega raw y el destino SES está habilitado. La confirmación del correo de alarmas y un evento SES identificable siguen pendientes.
+- CloudFormation V3 creó 15 recursos (`CREATE_COMPLETE`), incluida la política `osmi-transactional-feedback-consumer`. La suscripción SQS usa entrega raw, el destino SES está habilitado y el correo de alarmas quedó confirmado. Un evento SES identificable sigue pendiente.
 - El perfil `osmi-qr-backup-once` fue eliminado en IAM; CloudTrail registró su eliminación. EC2 todavía mostraba una asociación residual y la ruta IMDS de nombres de rol respondió 404 incluso después del reinicio. Los respaldos externos se descargan por SCP/SFTP y el respaldo previo a migración 14 ya se restauró en un entorno aislado.
 
 ## Crear identidad sin asociarla

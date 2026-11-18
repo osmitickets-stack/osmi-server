@@ -1,22 +1,21 @@
 # Entrega transaccional de boletos por SES
 
-## Estado previo requerido
+## Estado comprobado antes de desplegar Worker y Server
 
 - La rama de Server y la migración 14 pasaron la suite contra `osmidb_test` sin `SKIP`.
 - La imagen de Server y la de migración están publicadas y verificadas por revisión y digest. No usar `latest`.
-- El respaldo de `osmidb` tiene SHA-256 comprobado y una restauración aislada validada.
-- PostgreSQL comercial está en versión 13 limpia antes de migrar; no hay otra migración en curso.
+- El respaldo de `osmidb` tiene SHA-256 comprobado y una restauración aislada validada. La migración 14 se aplicó una sola vez y PostgreSQL quedó en `14|f`, con tres tablas y tres índices verificados. No repetir `up 1`.
 - El configuration set `osmi-transactional-prod` y la identidad `myosmi.com` permanecen activos en `us-east-1`.
-- La plantilla `ses-feedback.yaml` se valida como cambio de CloudFormation antes de ejecutarse. Confirmar la suscripción del buzón de alarmas.
-- La plantilla SES/SQS V3 crea `WorkerSqsPolicy` sin adjuntarla y no modifica IAM de la instancia. `ses-worker-identity.yaml` prepara un rol con SQS `ReceiveMessage`/`DeleteMessage` sobre la cola y SES `SendEmail` desde `boletos@myosmi.com`, además de un perfil nuevo **no asociado**. No ejecutar su change set hasta resolver el perfil residual `osmi-qr-backup-once` y autorizar explícitamente el cambio de asociación.
-- Bloqueo de seguridad: Server, Gateway y Worker de reservas alcanzan IMDS hoy. Antes de asociar una identidad, instalar y probar un filtro persistente que permita IMDS únicamente desde la red exclusiva `osmi-email-egress`; consultar `EMAIL_IAM_DOCKER_AUDIT.md`. Si no puede demostrarse ese aislamiento bajo el modelo de amenazas acordado, no arrancar el Worker en esta EC2.
+- CloudFormation V3 terminó `CREATE_COMPLETE` con 15 recursos verificados y el buzón de alarmas confirmó SNS. La política de SQS quedó adjunta al rol nuevo por el stack de identidad.
+- `ses-worker-identity.yaml` creó un rol con SQS `ReceiveMessage`/`DeleteMessage` sobre la cola y SES `SendEmail` desde `boletos@myosmi.com`. La auditoría, simulación y asociación del perfil nuevo a `osmi-api-prod` pasaron. La obtención de credenciales temporales se comprobará al iniciar el Worker.
+- El guard persistió tras reinicio controlado y bloqueó IMDS a los seis contenedores existentes antes y después de asociar IAM. El Worker todavía debe probar su excepción de red exclusiva `osmi-email-egress`; consultar `EMAIL_IAM_DOCKER_AUDIT.md`.
 - El Worker usa SES API con IMDSv2 y no requiere credenciales SMTP. Sale a SES/SQS por `email_egress` y llega a PostgreSQL por `data`. Al validar Compose, pasar el archivo de entorno solo para interpolar las variables declaradas; el contenedor no hereda el archivo completo. Comprobar únicamente **nombres** de variables, sin imprimir valores: no debe recibir claves AWS ni SMTP permanentes.
 
 ## Secuencia de publicación
 
 1. Registrar los IDs y digests actuales de Server, Gateway, Worker de reservas, PostgreSQL, Redis y Nginx. Etiquetar la imagen actual de Server para reversión. No recrear los otros servicios.
-2. Aplicar **solo** `000014_ticket_email_outbox.up.sql` mediante la imagen verificada de `osmi-db-migrate`, `up 1`, sin seed ni `force`. Confirmar `schema_migrations=14|false` y tablas de notificaciones presentes.
-3. Una vez autorizada y verificada la identidad y el filtro IMDS, validar `docker compose config --quiet` y `--dry-run` con `deploy/compose.email-worker.yml` y los overrides de imágenes por digest. Arrancar solo `email-worker` con `--no-deps --pull never --wait`, sin `--remove-orphans`. Su `--health` debe comprobar despacho y recepción SQS.
+2. **Completado:** `000014_ticket_email_outbox.up.sql` se aplicó con la imagen verificada de `osmi-db-migrate`, `up 1`, sin seed ni `force`; `schema_migrations=14|false`, tablas, índices, PostgreSQL y API pasaron.
+3. Validar `docker compose config --quiet` y `--dry-run` con `deploy/compose.email-worker.yml` y los overrides de imágenes por digest. Arrancar solo `email-worker` con `--no-deps --pull never --wait`, sin `--remove-orphans`, tras autorización. Su `--health` debe comprobar despacho y recepción SQS.
 4. Actualizar solo `server` con imagen por digest, `SES_CONFIGURATION_SET=osmi-transactional-prod`, el remitente actual `boletos@myosmi.com` y Reply-To supervisado. Usar `--no-deps --pull never --wait`. Comprobar revisión, salud, mTLS montado, API HTTPS origen y que los IDs de los demás servicios no cambiaron.
 5. Publicar el frontend cuando pase build. Su checkout ya no consulta ni crea clientes por correo; el servidor liga cuentas autenticadas y deja las compras invitadas sin cuenta. Comprobar los PDF de términos y privacidad por GET directo.
 6. Hacer **una** compra de prueba con cuenta registrada y buzón externo autorizado. Confirmar orden completada, boleto en «Mis boletos», un solo job de correo `delivered`, intento con ID SES, email en Principal/Promociones/Spam, SPF/DKIM/DMARC y QR renderizado en el correo. No realizar check-in ni repetir un pago lento.
