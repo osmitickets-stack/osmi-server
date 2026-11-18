@@ -1,6 +1,14 @@
 # Punto de control: persistencia del guard tras reiniciar EC2
 
-Estado: **preparado; reinicio no autorizado ni ejecutado**. El guard y el drop-in están instalados, el timer de rollback está deshabilitado y la instancia no tiene credenciales de rol utilizables. El respaldo nuevo previo a la migración 14 ya se validó; no repetirlo durante esta ventana.
+Estado: **reinicio controlado completado y guard persistente verificado el 18 de noviembre de 2026**. El guard y el drop-in permanecen instalados; el timer de rollback volvió a quedar deshabilitado. La instancia sigue sin credenciales de rol utilizables. El respaldo nuevo previo a la migración 14 ya se validó.
+
+## Resultado de la ventana autorizada
+
+- Antes del reinicio: `REBOOT_PREFLIGHT_PASS`, `SNAPSHOT_CIFRADO_OK`, timer `active/enabled` con `LEFT=14min` y huella del arranque registrada.
+- AWS aceptó **Reboot instance** para `osmi-api-prod`; SSH volvió. La huella de arranque posterior fue distinta.
+- Con el timer aún armado: `GUARD_REBOOT_CHECK_PASS`. El guard y Docker estaban activos; las reglas pasaron `ensure-imds-email-guard.sh check`; los seis contenedores estaban en ejecución, los cinco con healthcheck estaban sanos, PostgreSQL respondió y `osmidb` permaneció en migración `13|f`. API de origen y sitio público respondieron HTTP 200. La conexión TCP a IMDS falló desde los seis contenedores; la ruta de roles desde el host continuó en HTTP 404 sin mostrar credenciales.
+- Tras los PASS: `GUARD_REBOOT_PASS_TIMER_DESARMADO`. El timer quedó `inactive/disabled`, el guard y Docker siguieron activos y Server/Gateway saludables. El servicio de rollback manual se conserva instalado. No se ejecutó rollback durante esta ventana; su servicio y un disparo real del timer habían pasado antes de activar el guard.
+- Esta prueba confirma la persistencia en este arranque y para los seis contenedores actuales. La excepción del futuro Email Worker y los permisos IAM aún no están probados.
 
 ## Condiciones antes de solicitar el reinicio
 
