@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log"
 	"os"
 	"strings"
@@ -113,7 +112,19 @@ func dispatchLoop(ctx context.Context, outbox *email.TicketEmailOutbox, dispatch
 	}
 }
 
-func receiveEvents(ctx context.Context, queue *sqs.Client, queueURL string, outbox *email.TicketEmailOutbox) error {
+type feedbackQueue interface {
+	ReceiveMessage(context.Context, *sqs.ReceiveMessageInput, ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
+	DeleteMessage(context.Context, *sqs.DeleteMessageInput, ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
+}
+
+type eventRecorder interface {
+	RecordSESEvent(context.Context, *email.SESEvent) error
+}
+
+var _ feedbackQueue = (*sqs.Client)(nil)
+var _ eventRecorder = (*email.TicketEmailOutbox)(nil)
+
+func receiveEvents(ctx context.Context, queue feedbackQueue, queueURL string, outbox eventRecorder) error {
 	receiveCtx, receiveCancel := context.WithTimeout(ctx, 30*time.Second)
 	result, err := queue.ReceiveMessage(receiveCtx, &sqs.ReceiveMessageInput{
 		QueueUrl: aws.String(queueURL), MaxNumberOfMessages: 10,
@@ -133,8 +144,8 @@ func receiveEvents(ctx context.Context, queue *sqs.Client, queueURL string, outb
 			err = outbox.RecordSESEvent(applyCtx, event)
 			cancel()
 		}
-		if err != nil && !errors.Is(err, email.ErrUntrackedSESEvent) {
-			// Leave the message for SQS retry and eventually its dead-letter queue.
+		if err != nil {
+			// Preserve unknown, invalid, and failed events for SQS retry and its DLQ.
 			log.Printf("SES event processing failed: %T", err)
 			continue
 		}
