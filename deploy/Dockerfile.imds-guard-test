@@ -1,0 +1,18 @@
+FROM alpine:3.20
+
+COPY deploy/imds-email-worker.nft /fixtures/imds-email-worker.nft
+COPY deploy/ensure-imds-email-guard.sh /fixtures/ensure-imds-email-guard.sh
+COPY deploy/systemd/osmi-email-imds-guard.service /fixtures/osmi-email-imds-guard.service
+COPY deploy/systemd/docker-imds-guard.conf /fixtures/docker-imds-guard.conf
+COPY deploy/rollback-imds-email-guard.sh /tests/rollback-imds-email-guard.sh
+COPY deploy/imds-test/ /tests/
+
+RUN mkdir -p /mockbin /opt/osmi/deploy /etc/systemd/system/docker.service.d \
+    && cp /tests/mock-curl.sh /mockbin/curl \
+    && cp /tests/mock-systemctl.sh /mockbin/systemctl \
+    && cp /tests/mock-nft.sh /usr/sbin/nft \
+    && chmod +x /mockbin/curl /mockbin/systemctl /usr/sbin/nft \
+    && sh -n /tests/rollback-imds-email-guard.sh \
+    && sh -n /tests/run.sh \
+    && sh -n /fixtures/ensure-imds-email-guard.sh \
+    && PATH=/mockbin:/bin:/usr/bin /bin/sh /tests/run.sh

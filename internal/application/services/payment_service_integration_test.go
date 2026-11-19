@@ -24,16 +24,16 @@ type fakeTicketEmailSender struct {
 
 func (s *fakeTicketEmailSender) SendOrderTicketsEmailWithAttempt(
 	_ string, _ string, _ string, tickets []email.TicketEmailItem, attempt uuid.UUID,
-) error {
+) (string, error) {
 	if len(tickets) != 1 || tickets[0].QRBase64 == "" || attempt == uuid.Nil {
-		return errors.New("invalid ticket email fixture")
+		return "", errors.New("invalid ticket email fixture")
 	}
 	s.attempts = append(s.attempts, attempt)
 	if s.failNext {
 		s.failNext = false
-		return errors.New("simulated SMTP failure")
+		return "", errors.New("simulated transport failure")
 	}
-	return nil
+	return "test-message-" + attempt.String(), nil
 }
 
 func requireIntegrationDB(t *testing.T) *pgxpool.Pool {
@@ -556,13 +556,13 @@ func TestProcessPaidOrderConcurrentIsIdempotent(t *testing.T) {
 	dispatcher := email.NewTicketEmailDispatcher(pool, sender)
 	processed, dispatchErr := dispatcher.ProcessOne(ctx)
 	if !processed || dispatchErr == nil {
-		t.Fatalf("expected one retryable SMTP failure: processed=%v err=%v", processed, dispatchErr)
+		t.Fatalf("expected one retryable email transport failure: processed=%v err=%v", processed, dispatchErr)
 	}
 	var jobStatus string
 	if err := pool.QueryRow(ctx, `
 		SELECT status FROM notifications.ticket_email_jobs WHERE order_id=$1
 	`, orderID).Scan(&jobStatus); err != nil || jobStatus != "retrying" {
-		t.Fatalf("SMTP failure did not persist retry: status=%q err=%v", jobStatus, err)
+		t.Fatalf("email transport failure did not persist retry: status=%q err=%v", jobStatus, err)
 	}
 	if _, err := pool.Exec(ctx, `
 		UPDATE notifications.ticket_email_jobs
@@ -574,8 +574,15 @@ func TestProcessPaidOrderConcurrentIsIdempotent(t *testing.T) {
 	if !processed || dispatchErr != nil || len(sender.attempts) != 2 {
 		t.Fatalf("email retry failed: processed=%v err=%v attempts=%d", processed, dispatchErr, len(sender.attempts))
 	}
+	messageID := "test-message-" + sender.attempts[1].String()
+	var storedMessageID string
+	if err := pool.QueryRow(ctx, `
+		SELECT ses_message_id FROM notifications.ticket_email_attempts WHERE id=$1
+	`, sender.attempts[1]).Scan(&storedMessageID); err != nil || storedMessageID != messageID {
+		t.Fatalf("SES acceptance ID was not persisted: match=%v err=%v", storedMessageID == messageID, err)
+	}
 	event := &email.SESEvent{EventType: "Delivery", AttemptID: sender.attempts[1]}
-	event.Mail.MessageID = "ses-integration-delivery"
+	event.Mail.MessageID = messageID
 	if err := email.NewTicketEmailOutbox(pool).RecordSESEvent(ctx, event); err != nil {
 		t.Fatalf("record SES delivery: %v", err)
 	}
@@ -593,10 +600,10 @@ func TestProcessPaidOrderConcurrentIsIdempotent(t *testing.T) {
 	}
 	complaintPayload := []byte(fmt.Sprintf(`{
 		"eventType":"Complaint",
-		"mail":{"messageId":"ses-integration-delivery","destination":["integration@example.com"],
+		"mail":{"messageId":"%s","destination":["integration@example.com"],
 		        "tags":{"osmi_attempt_id":["%s"]}},
 		"complaint":{"complainedRecipients":[{"emailAddress":"integration@example.com"}]}
-	}`, sender.attempts[1]))
+	}`, messageID, sender.attempts[1]))
 	complaint, err := email.DecodeSESEvent(complaintPayload)
 	if err != nil {
 		t.Fatal(err)

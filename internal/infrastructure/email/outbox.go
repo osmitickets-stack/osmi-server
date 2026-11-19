@@ -103,7 +103,7 @@ func (o *TicketEmailOutbox) ClaimNext(ctx context.Context) (*TicketEmailJob, err
 	return job, nil
 }
 
-func (o *TicketEmailOutbox) MarkAccepted(ctx context.Context, job *TicketEmailJob) error {
+func (o *TicketEmailOutbox) MarkAccepted(ctx context.Context, job *TicketEmailJob, messageID string) error {
 	if o == nil || job == nil {
 		return errors.New("ticket email attempt is missing")
 	}
@@ -112,14 +112,19 @@ func (o *TicketEmailOutbox) MarkAccepted(ctx context.Context, job *TicketEmailJo
 		return err
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE notifications.ticket_email_attempts
 		SET status=CASE WHEN status='sending' THEN 'accepted' ELSE status END,
-		    accepted_at=COALESCE(accepted_at, NOW())
+		    accepted_at=COALESCE(accepted_at, NOW()),
+		    ses_message_id=COALESCE(NULLIF(ses_message_id,''),NULLIF($3,''))
 		WHERE id=$1 AND job_id=$2
-	`, job.AttemptID.String(), job.ID)
+		  AND ($3='' OR ses_message_id IS NULL OR ses_message_id='' OR ses_message_id=$3)
+	`, job.AttemptID.String(), job.ID, messageID)
 	if err != nil {
 		return fmt.Errorf("mark email attempt accepted: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return errors.New("email attempt acceptance does not match SES message")
 	}
 	_, err = tx.Exec(ctx, `
 		UPDATE notifications.ticket_email_jobs
@@ -132,7 +137,7 @@ func (o *TicketEmailOutbox) MarkAccepted(ctx context.Context, job *TicketEmailJo
 	return tx.Commit(ctx)
 }
 
-// MarkFailure records only a classification, never the SMTP response, which
+// MarkFailure records only a classification, never the provider response, which
 // could contain a recipient address or other private information.
 func (o *TicketEmailOutbox) MarkFailure(ctx context.Context, job *TicketEmailJob, code string) error {
 	if o == nil || job == nil {
