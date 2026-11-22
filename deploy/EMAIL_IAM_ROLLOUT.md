@@ -1,6 +1,6 @@
 # Identidad IAM del Email Worker en la EC2 actual
 
-Estado: **stack de identidad creado y perfil nuevo asociado a `osmi-api-prod` con autorización**. La confianza, políticas, simulación IAM, guard IMDS, seis contenedores y servicios pasaron. Falta comprobar la obtención de credenciales temporales dentro del Email Worker. Esta guía no autoriza cambios adicionales en producción.
+Estado: **stack de identidad creado y perfil nuevo asociado a `osmi-api-prod` con autorización**. La confianza, políticas, simulación IAM, guard IMDS, seis contenedores y servicios pasaron. El Email Worker obtuvo credenciales temporales y se desplegó. La compra E2E detectó un permiso SES Raw/MIME faltante; la corrección de IAM sigue pendiente de autorización. Esta guía no autoriza cambios adicionales en producción.
 
 ## Dependencias comprobadas
 
@@ -13,6 +13,12 @@ Estado: **stack de identidad creado y perfil nuevo asociado a `osmi-api-prod` co
 1. Confirmar por lectura que la asociación residual sigue en estado `associated` para `osmi-api-prod`, que `GetInstanceProfile(osmi-qr-backup-once)` sigue en `NoSuchEntity`, que el rol y perfil nuevos no existen y que la política de V3 coincide con su salida de CloudFormation. Detenerse si cambió cualquiera de estos hechos.
 2. Crear un change set separado desde `ses-worker-identity.yaml` con `CAPABILITY_NAMED_IAM`; revisar que proponga exactamente un `AWS::IAM::Role` y un `AWS::IAM::InstanceProfile`, sin recurso `AWS::EC2::*` ni asociación. No ejecutarlo hasta obtener autorización específica.
 3. Ejecutar ese change set en una etapa autorizada. Confirmar `CREATE_COMPLETE`, rol con confianza solo en `ec2.amazonaws.com`, política administrada V3 adjunta y política inline con únicamente `ses:SendEmail` sobre `myosmi.com`/`osmi-transactional-prod` y `ses:FromAddress=boletos@myosmi.com`. Confirmar perfil con solo ese rol. Simular permisos efectivos: permitir esas acciones sobre los recursos exactos; denegar otro remitente, otra identidad, otra cola y la DLQ. El Worker solo usa `sqs:ReceiveMessage` y `sqs:DeleteMessage`; no necesita `GetQueueAttributes`.
+
+## Corrección SES Raw/MIME pendiente
+
+Una compra controlada completó el pago, creó un boleto con QR y un job único. El job agotó cinco intentos `email_send_failed` sin ID SES. Una única llamada sintética `SESv2 SendEmail` con contenido Raw, el mismo rol, remitente y configuration set devolvió `AccessDeniedException`. La simulación IAM mostró `ses:SendEmail=allowed` y `ses:SendRawEmail=implicitDeny`; la referencia de autorización SES v2 enumera ambas acciones para `SendEmail` según el formato. La plantilla local agrega solo `ses:SendRawEmail` al mismo statement, conservando la identidad, el configuration set y `ses:FromAddress`.
+
+Antes de cambiar producción, validar la plantilla y crear un change set **UPDATE** para el stack de identidad existente. Revisar que proponga solo `Modify` de `AWS::IAM::Role` para esa política inline; no debe cambiar perfil, asociación EC2, confianza, política SQS ni otros recursos. Ejecutarlo exige autorización separada. Después, simular ambas acciones permitidas solo sobre los dos recursos y el remitente aprobados, y volver a probar una llamada sintética controlada sin datos de cliente. El job agotado no se reactiva ni se vuelve a cobrar sin un plan de recuperación específico y autorización separada.
 
 ## Sustituir la asociación residual
 

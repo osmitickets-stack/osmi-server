@@ -4,7 +4,7 @@ Estado: las pruebas de producción requieren autorización independiente. No rep
 
 | Capa | Prueba verificable | Criterio |
 |---|---|---|
-| IAM/IMDS | Desde Server, Gateway y Worker de reservas intentar abrir TCP/80 de IMDS sin leer metadatos; desde Email Worker probar obtención de credenciales sin imprimirlas | Solo Email Worker accede. El bloqueo persiste después de reinicio y recreación. La simulación IAM permite únicamente `ses:SendEmail` del remitente y `sqs:ReceiveMessage`/`sqs:DeleteMessage` de la cola. |
+| IAM/IMDS | Desde Server, Gateway y Worker de reservas intentar abrir TCP/80 de IMDS sin leer metadatos; desde Email Worker probar obtención de credenciales sin imprimirlas | Solo Email Worker accede. El bloqueo persiste después de reinicio y recreación. La simulación IAM permite `ses:SendEmail` y `ses:SendRawEmail` solo del remitente aprobado y `sqs:ReceiveMessage`/`sqs:DeleteMessage` solo de la cola aprobada. |
 | Compra y Outbox | Una compra controlada con cuenta registrada y buzón externo | Pago completado, un boleto, un job por orden, intento con `ses_message_id` persistido al aceptar SES API, sin otro cobro. |
 | Entrega | Consultar el estado agregado del job y el buzón propio | Evento `Send` seguido de `Delivery`; job `delivered`, correo visible con QR renderizado, SPF/DKIM/DMARC PASS y boleto accesible en «Mis boletos». El QR nunca se imprime en logs; el scanner queda fuera de esta prioridad. |
 | Reintento | En base aislada, simular falla de envío y recuperar el Worker | Job pasa a `retrying`, conserva un solo job por orden, reintenta con espera y finaliza `delivered` o `exhausted` sin otra venta. Puede haber dos correos si SES aceptó uno antes de un fallo de confirmación en DB: entrega *at least once*. |

@@ -22,7 +22,9 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: ses:SendEmail
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:ses:us-east-1:${AWS::AccountId}:identity/myosmi.com'
                   - !Sub 'arn:${AWS::Partition}:ses:us-east-1:${AWS::AccountId}:configuration-set/osmi-transactional-prod'
