@@ -59,7 +59,10 @@ func main() {
 	}
 	queue := sqs.NewFromConfig(awsConfig)
 	outbox := email.NewTicketEmailOutbox(database.Pool)
-	sender := email.NewSESAPIClient(sesv2.NewFromConfig(awsConfig))
+	// The outbox owns retries and their attempt IDs. Keep each SES call to one
+	// HTTP attempt so a timeout cannot silently send the same ticket twice.
+	sesAPI := newSingleAttemptSESClient(awsConfig)
+	sender := email.NewSESAPIClient(sesAPI)
 	if err := sender.ValidateConfig(); err != nil {
 		log.Fatal("email worker SES API configuration is invalid")
 	}
@@ -73,6 +76,12 @@ func main() {
 			writeHeartbeat(receiveBeat)
 		}
 	}
+}
+
+func newSingleAttemptSESClient(config aws.Config) *sesv2.Client {
+	return sesv2.NewFromConfig(config, func(options *sesv2.Options) {
+		options.Retryer = aws.NopRetryer{}
+	})
 }
 
 func writeHeartbeat(path string) {

@@ -106,3 +106,11 @@ func TestReceiveEventsHandlesQueueErrors(t *testing.T) {
 		t.Fatalf("delete attempts=%d; want 1", queue.deletes)
 	}
 }
+
+func TestSESSendUsesOneSDKAttempt(t *testing.T) {
+	client := newSingleAttemptSESClient(aws.Config{Region: "us-east-1"})
+	retryer := client.Options().Retryer
+	if retryer == nil || retryer.MaxAttempts() != 1 || retryer.IsErrorRetryable(errors.New("timeout")) {
+		t.Fatal("SES client may retry one outbox attempt more than once")
+	}
+}
