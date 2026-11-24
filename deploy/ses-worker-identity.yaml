@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Dedicated EC2 identity for the OSMI transactional email worker. Does not associate the profile with an instance.
+
+Resources:
+  EmailWorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: osmi-transactional-email-worker
+      Description: Sends OSMI transactional mail and consumes only its SES feedback queue.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/osmi-transactional-feedback-consumer'
+      Policies:
+        - PolicyName: osmi-transactional-ses-send
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ses:us-east-1:${AWS::AccountId}:identity/myosmi.com'
+                  - !Sub 'arn:${AWS::Partition}:ses:us-east-1:${AWS::AccountId}:configuration-set/osmi-transactional-prod'
+                Condition:
+                  StringEquals:
+                    'ses:FromAddress': boletos@myosmi.com
+
+  EmailWorkerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: osmi-transactional-email-worker
+      Roles: [!Ref EmailWorkerRole]
+
+Outputs:
+  InstanceProfileName:
+    Value: !Ref EmailWorkerInstanceProfile
+  RoleName:
+    Value: !Ref EmailWorkerRole

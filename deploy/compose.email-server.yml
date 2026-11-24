@@ -1,0 +1,3 @@
+services:
+  server:
+    image: "${OSMI_EMAIL_IMAGE:?set a verified ghcr.io digest}"

@@ -2,6 +2,7 @@ package email
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"html/template"
@@ -10,7 +11,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 	"github.com/google/uuid"
 	"gopkg.in/gomail.v2"
 )
@@ -22,6 +27,11 @@ type SESClient struct {
 	password string
 	from     string
 	replyTo  string
+	api      sesEmailAPI
+}
+
+type sesEmailAPI interface {
+	SendEmail(context.Context, *sesv2.SendEmailInput, ...func(*sesv2.Options)) (*sesv2.SendEmailOutput, error)
 }
 
 type TicketEmailItem struct {
@@ -64,28 +74,41 @@ func NewSESClient() *SESClient {
 	}
 }
 
+// NewSESAPIClient uses the caller's temporary-role AWS configuration. The
+// commercial Server keeps NewSESClient (SMTP) until the API path is verified.
+func NewSESAPIClient(api sesEmailAPI) *SESClient {
+	return &SESClient{
+		api:     api,
+		from:    strings.TrimSpace(os.Getenv("SMTP_FROM")),
+		replyTo: strings.TrimSpace(os.Getenv("SMTP_REPLY_TO")),
+	}
+}
+
 func (s *SESClient) validateConfig() error {
 	var missing []string
 
-	if s.host == "" {
+	if s.api == nil && s.host == "" {
 		missing = append(missing, "SMTP_HOST")
 	}
-	if s.username == "" {
+	if s.api == nil && s.username == "" {
 		missing = append(missing, "SMTP_USERNAME")
 	}
-	if s.password == "" {
+	if s.api == nil && s.password == "" {
 		missing = append(missing, "SMTP_PASSWORD")
 	}
 	if s.from == "" {
 		missing = append(missing, "SMTP_FROM")
 	}
-	if s.port <= 0 {
+	if s.api == nil && s.port <= 0 {
 		missing = append(missing, "SMTP_PORT")
 	}
 
+	if s.api != nil && strings.TrimSpace(os.Getenv("SES_CONFIGURATION_SET")) == "" {
+		missing = append(missing, "SES_CONFIGURATION_SET")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf(
-			"SMTP configuration incomplete: missing %s",
+			"email configuration incomplete: missing %s",
 			strings.Join(missing, ", "),
 		)
 	}
@@ -117,7 +140,8 @@ func (s *SESClient) SendOrderTicketsEmail(
 	orderID string,
 	tickets []TicketEmailItem,
 ) error {
-	return s.SendOrderTicketsEmailWithAttempt(toEmail, customerName, orderID, tickets, uuid.Nil)
+	_, err := s.SendOrderTicketsEmailWithAttempt(toEmail, customerName, orderID, tickets, uuid.Nil)
+	return err
 }
 
 // SendOrderTicketsEmailWithAttempt tags an outbox attempt so SES feedback can
@@ -128,17 +152,17 @@ func (s *SESClient) SendOrderTicketsEmailWithAttempt(
 	orderID string,
 	tickets []TicketEmailItem,
 	attemptID uuid.UUID,
-) error {
+) (string, error) {
 	if err := s.validateConfig(); err != nil {
-		return err
+		return "", err
 	}
 	if attemptID != uuid.Nil && strings.TrimSpace(os.Getenv("SES_CONFIGURATION_SET")) == "" {
-		return fmt.Errorf("SES_CONFIGURATION_SET is required for tracked ticket email")
+		return "", fmt.Errorf("SES_CONFIGURATION_SET is required for tracked ticket email")
 	}
 
 	toEmail = strings.TrimSpace(toEmail)
 	if toEmail == "" {
-		return fmt.Errorf("recipient email is required")
+		return "", fmt.Errorf("recipient email is required")
 	}
 
 	if strings.TrimSpace(customerName) == "" {
@@ -146,11 +170,11 @@ func (s *SESClient) SendOrderTicketsEmailWithAttempt(
 	}
 
 	if strings.TrimSpace(orderID) == "" {
-		return fmt.Errorf("order ID is required")
+		return "", fmt.Errorf("order ID is required")
 	}
 
 	if len(tickets) == 0 {
-		return fmt.Errorf("cannot send ticket email without tickets")
+		return "", fmt.Errorf("cannot send ticket email without tickets")
 	}
 
 	templateItems := make([]ticketTemplateItem, 0, len(tickets))
@@ -162,20 +186,20 @@ func (s *SESClient) SendOrderTicketsEmailWithAttempt(
 	}
 	m.SetHeader("To", toEmail)
 	m.SetHeader("Subject", "Tus boletos están listos - osmi")
-	if configurationSet := strings.TrimSpace(os.Getenv("SES_CONFIGURATION_SET")); configurationSet != "" {
+	if configurationSet := strings.TrimSpace(os.Getenv("SES_CONFIGURATION_SET")); configurationSet != "" && s.api == nil {
 		m.SetHeader("X-SES-CONFIGURATION-SET", configurationSet)
 	}
-	if attemptID != uuid.Nil {
+	if attemptID != uuid.Nil && s.api == nil {
 		m.SetHeader("X-SES-MESSAGE-TAGS", "osmi_attempt_id="+attemptID.String())
 	}
 
 	for i, ticket := range tickets {
 		if strings.TrimSpace(ticket.TicketCode) == "" {
-			return fmt.Errorf("ticket %d has empty code", i+1)
+			return "", fmt.Errorf("ticket %d has empty code", i+1)
 		}
 
 		if strings.TrimSpace(ticket.QRBase64) == "" {
-			return fmt.Errorf(
+			return "", fmt.Errorf(
 				"ticket %s has empty QR data",
 				ticket.TicketCode,
 			)
@@ -183,7 +207,7 @@ func (s *SESClient) SendOrderTicketsEmailWithAttempt(
 
 		qrPNG, err := base64.StdEncoding.DecodeString(ticket.QRBase64)
 		if err != nil {
-			return fmt.Errorf(
+			return "", fmt.Errorf(
 				"failed to decode QR for ticket %s: %w",
 				ticket.TicketCode,
 				err,
@@ -228,13 +252,13 @@ func (s *SESClient) SendOrderTicketsEmailWithAttempt(
 
 	tmpl, err := template.New("ticket-email").Parse(ticketEmailHTML)
 	if err != nil {
-		return fmt.Errorf("failed to parse email template: %w", err)
+		return "", fmt.Errorf("failed to parse email template: %w", err)
 	}
 
 	var body bytes.Buffer
 
 	if err := tmpl.Execute(&body, data); err != nil {
-		return fmt.Errorf("failed to render email template: %w", err)
+		return "", fmt.Errorf("failed to render email template: %w", err)
 	}
 
 	var plain strings.Builder
@@ -245,6 +269,34 @@ func (s *SESClient) SendOrderTicketsEmailWithAttempt(
 	plain.WriteString("\nPresenta el código QR incluido en la versión HTML de este correo para acceder. Si no puedes verlo, contacta a soporte de OSMI con tu número de pedido.\n")
 	m.SetBody("text/plain", plain.String())
 	m.AddAlternative("text/html", body.String())
+	if s.api != nil {
+		var raw bytes.Buffer
+		if _, err := m.WriteTo(&raw); err != nil {
+			return "", fmt.Errorf("failed to encode ticket email: %w", err)
+		}
+		input := &sesv2.SendEmailInput{
+			FromEmailAddress:     aws.String(s.from),
+			Destination:          &types.Destination{ToAddresses: []string{toEmail}},
+			Content:              &types.EmailContent{Raw: &types.RawMessage{Data: raw.Bytes()}},
+			ConfigurationSetName: aws.String(strings.TrimSpace(os.Getenv("SES_CONFIGURATION_SET"))),
+		}
+		if s.replyTo != "" {
+			input.ReplyToAddresses = []string{s.replyTo}
+		}
+		if attemptID != uuid.Nil {
+			input.EmailTags = []types.MessageTag{{Name: aws.String("osmi_attempt_id"), Value: aws.String(attemptID.String())}}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		result, err := s.api.SendEmail(ctx, input)
+		if err != nil {
+			return "", fmt.Errorf("SES API send failed: %T", err)
+		}
+		if result == nil || strings.TrimSpace(aws.ToString(result.MessageId)) == "" {
+			return "", fmt.Errorf("SES API send returned no message ID")
+		}
+		return aws.ToString(result.MessageId), nil
+	}
 
 	dialer := gomail.NewDialer(
 		s.host,
@@ -254,10 +306,10 @@ func (s *SESClient) SendOrderTicketsEmailWithAttempt(
 	)
 
 	if err := dialer.DialAndSend(m); err != nil {
-		return fmt.Errorf("failed to send ticket email: %w", err)
+		return "", fmt.Errorf("failed to send ticket email: %w", err)
 	}
 
-	return nil
+	return "", nil
 }
 
 const ticketEmailHTML = `

@@ -6,6 +6,11 @@ on:
       - main
 
   workflow_dispatch:
+    inputs:
+      promote_latest:
+        description: Explicitly update latest (main only)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,6 +36,16 @@ jobs:
 
     steps:
 
+      - name: Guard latest promotion
+        if: inputs.promote_latest
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [[ "$REF" != refs/heads/main ]]; then
+            echo 'latest promotion is allowed only from main' >&2
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -55,11 +70,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ env.IMAGE_NAME }}
+          flavor: latest=false
 
           tags: |
-            type=raw,value=latest
-            type=ref,event=branch
-            type=sha
+            type=raw,value=sha-${{ github.sha }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+            type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.promote_latest }}
 
           labels: |
             org.opencontainers.image.title=OSMI Server
@@ -71,6 +86,7 @@ jobs:
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
 
       - name: Build and Push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -88,8 +104,9 @@ jobs:
 
           provenance: false
 
-      - name: Image summary
+      - name: Record image digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          echo "Docker image published successfully."
-          echo "Image:"
-          echo "ghcr.io/${{ env.IMAGE_NAME }}"
+          test -n "$DIGEST"
+          echo "Server image: ghcr.io/${{ env.IMAGE_NAME }}@$DIGEST" >> "$GITHUB_STEP_SUMMARY"

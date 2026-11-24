@@ -14,8 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const maxTicketEmailAttempts = 5
-
 // TicketEmailJob contains identifiers only. The recipient and signed QR are
 // loaded from the paid order at send time and are never stored in the outbox.
 type TicketEmailJob struct {
@@ -23,6 +21,7 @@ type TicketEmailJob struct {
 	OrderID       int64
 	AttemptID     uuid.UUID
 	AttemptNumber int
+	MaxAttempts   int
 }
 
 type TicketEmailOutbox struct {
@@ -51,7 +50,7 @@ func (o *TicketEmailOutbox) EnqueueTx(ctx context.Context, tx pgx.Tx, orderID in
 
 // ClaimNext serializes workers through SKIP LOCKED. A timed-out lease may be
 // retried, so transport delivery is at least once if a process crashes after
-// SMTP accepts a message but before the database acknowledges it.
+// SES accepts a message but before the database acknowledges it.
 func (o *TicketEmailOutbox) ClaimNext(ctx context.Context) (*TicketEmailJob, error) {
 	if o == nil || o.pool == nil {
 		return nil, errors.New("ticket email outbox is not configured")
@@ -63,15 +62,15 @@ func (o *TicketEmailOutbox) ClaimNext(ctx context.Context) (*TicketEmailJob, err
 	defer tx.Rollback(ctx)
 	job := &TicketEmailJob{}
 	err = tx.QueryRow(ctx, `
-		SELECT id, order_id, attempts
+		SELECT id, order_id, attempts, max_attempts
 		FROM notifications.ticket_email_jobs
-		WHERE attempts < $1 AND (
+		WHERE attempts < max_attempts AND (
 			(status IN ('pending','retrying') AND next_attempt_at <= NOW())
 			OR (status = 'sending' AND lease_until < NOW())
 		)
 		ORDER BY COALESCE(next_attempt_at, lease_until), id
 		LIMIT 1 FOR UPDATE SKIP LOCKED
-	`, maxTicketEmailAttempts).Scan(&job.ID, &job.OrderID, &job.AttemptNumber)
+	`).Scan(&job.ID, &job.OrderID, &job.AttemptNumber, &job.MaxAttempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -103,7 +102,7 @@ func (o *TicketEmailOutbox) ClaimNext(ctx context.Context) (*TicketEmailJob, err
 	return job, nil
 }
 
-func (o *TicketEmailOutbox) MarkAccepted(ctx context.Context, job *TicketEmailJob) error {
+func (o *TicketEmailOutbox) MarkAccepted(ctx context.Context, job *TicketEmailJob, messageID string) error {
 	if o == nil || job == nil {
 		return errors.New("ticket email attempt is missing")
 	}
@@ -112,14 +111,19 @@ func (o *TicketEmailOutbox) MarkAccepted(ctx context.Context, job *TicketEmailJo
 		return err
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE notifications.ticket_email_attempts
 		SET status=CASE WHEN status='sending' THEN 'accepted' ELSE status END,
-		    accepted_at=COALESCE(accepted_at, NOW())
+		    accepted_at=COALESCE(accepted_at, NOW()),
+		    ses_message_id=COALESCE(NULLIF(ses_message_id,''),NULLIF($3,''))
 		WHERE id=$1 AND job_id=$2
-	`, job.AttemptID.String(), job.ID)
+		  AND ($3='' OR ses_message_id IS NULL OR ses_message_id='' OR ses_message_id=$3)
+	`, job.AttemptID.String(), job.ID, messageID)
 	if err != nil {
 		return fmt.Errorf("mark email attempt accepted: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return errors.New("email attempt acceptance does not match SES message")
 	}
 	_, err = tx.Exec(ctx, `
 		UPDATE notifications.ticket_email_jobs
@@ -132,7 +136,7 @@ func (o *TicketEmailOutbox) MarkAccepted(ctx context.Context, job *TicketEmailJo
 	return tx.Commit(ctx)
 }
 
-// MarkFailure records only a classification, never the SMTP response, which
+// MarkFailure records only a classification, never the provider response, which
 // could contain a recipient address or other private information.
 func (o *TicketEmailOutbox) MarkFailure(ctx context.Context, job *TicketEmailJob, code string) error {
 	if o == nil || job == nil {
@@ -157,15 +161,7 @@ func (o *TicketEmailOutbox) MarkFailure(ctx context.Context, job *TicketEmailJob
 	if err != nil {
 		return fmt.Errorf("mark email attempt failed: %w", err)
 	}
-	status := "retrying"
-	var next *time.Time
-	if job.AttemptNumber >= maxTicketEmailAttempts {
-		status = "exhausted"
-	} else {
-		// One, two, four, then eight minutes. The bound avoids retry storms.
-		at := time.Now().UTC().Add(time.Minute * time.Duration(1<<(job.AttemptNumber-1)))
-		next = &at
-	}
+	status, next := failureSchedule(job, time.Now().UTC())
 	_, err = tx.Exec(ctx, `
 		UPDATE notifications.ticket_email_jobs
 		SET status=$3, next_attempt_at=$4, lease_until=NULL, updated_at=NOW()
@@ -175,6 +171,16 @@ func (o *TicketEmailOutbox) MarkFailure(ctx context.Context, job *TicketEmailJob
 		return fmt.Errorf("schedule email retry: %w", err)
 	}
 	return tx.Commit(ctx)
+}
+
+func failureSchedule(job *TicketEmailJob, now time.Time) (string, *time.Time) {
+	if job.AttemptNumber >= job.MaxAttempts {
+		return "exhausted", nil
+	}
+	// One, two, four, then eight minutes for normal jobs. An explicitly
+	// authorized sixth attempt is final if it fails.
+	at := now.Add(time.Minute * time.Duration(1<<(job.AttemptNumber-1)))
+	return "retrying", &at
 }
 
 func (o *TicketEmailOutbox) MarkRejected(ctx context.Context, job *TicketEmailJob, code string) error {
@@ -215,8 +221,8 @@ func (o *TicketEmailOutbox) ExhaustExpiredFinalLeases(ctx context.Context) error
 	_, err := o.pool.Exec(ctx, `
 		UPDATE notifications.ticket_email_jobs
 		SET status='exhausted', lease_until=NULL, updated_at=NOW()
-		WHERE status='sending' AND lease_until < NOW() AND attempts >= $1
-	`, maxTicketEmailAttempts)
+		WHERE status='sending' AND lease_until < NOW() AND attempts >= max_attempts
+	`)
 	return err
 }
 

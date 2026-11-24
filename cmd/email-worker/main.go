@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log"
 	"os"
 	"strings"
@@ -10,6 +9,9 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds"
+	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/osmitickets-stack/osmi-server/internal/database"
 	"github.com/osmitickets-stack/osmi-server/internal/infrastructure/email"
@@ -34,28 +36,35 @@ func main() {
 	if queueURL == "" || os.Getenv("SES_CONFIGURATION_SET") != "osmi-transactional-prod" {
 		log.Fatal("email worker queue or SES configuration set is missing")
 	}
-	if os.Getenv("SMTP_HOST") != "email-smtp.us-east-1.amazonaws.com" ||
-		os.Getenv("SMTP_USERNAME") == "" || os.Getenv("SMTP_PASSWORD") == "" ||
-		os.Getenv("SMTP_FROM") != "boletos@myosmi.com" {
-		log.Fatal("email worker SMTP configuration is incomplete")
+	if os.Getenv("SMTP_FROM") != "boletos@myosmi.com" {
+		log.Fatal("email worker sender configuration is incomplete")
 	}
 	if err := database.Init(); err != nil {
 		log.Fatalf("email worker database unavailable: %T", err)
 	}
 	defer database.Close()
 	ctx := context.Background()
-	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	roleProvider := ec2rolecreds.New(func(options *ec2rolecreds.Options) {
+		options.Client = imds.New(imds.Options{EnableFallback: aws.FalseTernary})
+	})
+	awsConfig, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(region),
+		config.WithCredentialsProvider(aws.NewCredentialsCache(roleProvider)),
+	)
 	if err != nil {
 		log.Fatalf("email worker AWS configuration unavailable: %T", err)
 	}
 	if _, err := awsConfig.Credentials.Retrieve(ctx); err != nil {
-		log.Fatalf("email worker AWS credentials unavailable: %T", err)
+		log.Fatalf("email worker EC2 role credentials unavailable: %T", err)
 	}
 	queue := sqs.NewFromConfig(awsConfig)
 	outbox := email.NewTicketEmailOutbox(database.Pool)
-	sender := email.NewSESClient()
+	// The outbox owns retries and their attempt IDs. Keep each SES call to one
+	// HTTP attempt so a timeout cannot silently send the same ticket twice.
+	sesAPI := newSingleAttemptSESClient(awsConfig)
+	sender := email.NewSESAPIClient(sesAPI)
 	if err := sender.ValidateConfig(); err != nil {
-		log.Fatal("email worker SMTP configuration is invalid")
+		log.Fatal("email worker SES API configuration is invalid")
 	}
 	dispatcher := email.NewTicketEmailDispatcher(database.Pool, sender)
 	go dispatchLoop(ctx, outbox, dispatcher)
@@ -67,6 +76,12 @@ func main() {
 			writeHeartbeat(receiveBeat)
 		}
 	}
+}
+
+func newSingleAttemptSESClient(config aws.Config) *sesv2.Client {
+	return sesv2.NewFromConfig(config, func(options *sesv2.Options) {
+		options.Retryer = aws.NopRetryer{}
+	})
 }
 
 func writeHeartbeat(path string) {
@@ -106,11 +121,25 @@ func dispatchLoop(ctx context.Context, outbox *email.TicketEmailOutbox, dispatch
 	}
 }
 
-func receiveEvents(ctx context.Context, queue *sqs.Client, queueURL string, outbox *email.TicketEmailOutbox) error {
-	result, err := queue.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+type feedbackQueue interface {
+	ReceiveMessage(context.Context, *sqs.ReceiveMessageInput, ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
+	DeleteMessage(context.Context, *sqs.DeleteMessageInput, ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
+}
+
+type eventRecorder interface {
+	RecordSESEvent(context.Context, *email.SESEvent) error
+}
+
+var _ feedbackQueue = (*sqs.Client)(nil)
+var _ eventRecorder = (*email.TicketEmailOutbox)(nil)
+
+func receiveEvents(ctx context.Context, queue feedbackQueue, queueURL string, outbox eventRecorder) error {
+	receiveCtx, receiveCancel := context.WithTimeout(ctx, 30*time.Second)
+	result, err := queue.ReceiveMessage(receiveCtx, &sqs.ReceiveMessageInput{
 		QueueUrl: aws.String(queueURL), MaxNumberOfMessages: 10,
 		WaitTimeSeconds: queueWait, VisibilityTimeout: queueVisibility,
 	})
+	receiveCancel()
 	if err != nil {
 		return err
 	}
@@ -124,14 +153,16 @@ func receiveEvents(ctx context.Context, queue *sqs.Client, queueURL string, outb
 			err = outbox.RecordSESEvent(applyCtx, event)
 			cancel()
 		}
-		if err != nil && !errors.Is(err, email.ErrUntrackedSESEvent) {
-			// Leave the message for SQS retry and eventually its dead-letter queue.
+		if err != nil {
+			// Preserve unknown, invalid, and failed events for SQS retry and its DLQ.
 			log.Printf("SES event processing failed: %T", err)
 			continue
 		}
-		_, err = queue.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+		deleteCtx, deleteCancel := context.WithTimeout(ctx, 10*time.Second)
+		_, err = queue.DeleteMessage(deleteCtx, &sqs.DeleteMessageInput{
 			QueueUrl: aws.String(queueURL), ReceiptHandle: message.ReceiptHandle,
 		})
+		deleteCancel()
 		if err != nil {
 			log.Printf("SES event delete failed: %T", err)
 		}

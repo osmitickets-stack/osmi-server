@@ -1,0 +1,39 @@
+# Punto de control: persistencia del guard tras reiniciar EC2
+
+Estado: **reinicio controlado completado y guard persistente verificado el 18 de noviembre de 2026**. El guard y el drop-in permanecen instalados; el timer de rollback volvió a quedar deshabilitado. La instancia sigue sin credenciales de rol utilizables. El respaldo nuevo previo a la migración 14 ya se validó.
+
+## Resultado de la ventana autorizada
+
+- Antes del reinicio: `REBOOT_PREFLIGHT_PASS`, `SNAPSHOT_CIFRADO_OK`, timer `active/enabled` con `LEFT=14min` y huella del arranque registrada.
+- AWS aceptó **Reboot instance** para `osmi-api-prod`; SSH volvió. La huella de arranque posterior fue distinta.
+- Con el timer aún armado: `GUARD_REBOOT_CHECK_PASS`. El guard y Docker estaban activos; las reglas pasaron `ensure-imds-email-guard.sh check`; los seis contenedores estaban en ejecución, los cinco con healthcheck estaban sanos, PostgreSQL respondió y `osmidb` permaneció en migración `13|f`. API de origen y sitio público respondieron HTTP 200. La conexión TCP a IMDS falló desde los seis contenedores; la ruta de roles desde el host continuó en HTTP 404 sin mostrar credenciales.
+- Tras los PASS: `GUARD_REBOOT_PASS_TIMER_DESARMADO`. El timer quedó `inactive/disabled`, el guard y Docker siguieron activos y Server/Gateway saludables. El servicio de rollback manual se conserva instalado. No se ejecutó rollback durante esta ventana; su servicio y un disparo real del timer habían pasado antes de activar el guard.
+- Esta prueba confirma la persistencia en este arranque y para los seis contenedores actuales. La excepción del futuro Email Worker y los permisos IAM aún no están probados.
+
+## Condiciones antes de solicitar el reinicio
+
+1. Registrar la revisión, ID y salud de Server y los IDs/estados de Gateway, Worker de reservas, PostgreSQL, Redis y Nginx. Confirmar API de origen y sitio público HTTP 200, `pg_isready` y cero reinicios del Worker de reservas. Confirmar `schema_migrations=13|false`; no aplicar migración 14 durante esta ventana.
+2. Confirmar `osmi-email-imds-guard.service=active`, `docker.service=active`, `osmi-email-imds-rollback.timer=disabled/inactive`, `ensure-imds-email-guard.sh check` PASS y que las reglas nft solo pertenecen a `inet osmi_email_imds`. Confirmar IMDSv2 obligatorio, IAM sin credenciales (ruta de nombres de rol HTTP 404) y que los seis contenedores no alcanzan IMDS por TCP. No imprimir tokens ni nombres de rol.
+3. Comprobar los hashes de los siete archivos instalados contra los paquetes `33d7905` y `b4069e7`; detenerse ante cualquier diferencia. Conservar ambos paquetes privados de staging. No sobrescribir Compose, unidades base ni `/etc/nftables.conf`.
+4. Respaldo previo completado: `BACKUP_EC2_OK`, `BACKUP_LOCAL_OK`, `BACKUP_SHA_MATCH` y `RESTORE_ISOLATED_PASS`. El archivo nuevo en formato custom se verificó con SHA-256 y `pg_restore -l`; la copia externa tuvo el mismo SHA-256 y se restauró por completo en Docker Desktop, en una base nueva dentro de un contenedor sin red ni volúmenes del host. Se verificó `schema_migrations=13|false` y la presencia de tablas. Conservar ambas copias; no restaurar sobre `osmidb` ni repetir el respaldo sin un motivo técnico concreto.
+5. El preflight de EC2 confirmó raíz `ebs` e instancia `running`; el preflight de guard, Docker, aplicación, base e IAM pasó. La consola EC2 queda como vía de control del reinicio. `SNAPSHOT_CIFRADO_OK` confirmó una copia cifrada y privada, estado `completed`, progreso 100 %, clave KMS activa y tamaño de 20 GiB. El snapshot directo temporal sin cifrar se eliminó solo después de esas comprobaciones. Conservar la copia cifrada y el respaldo PostgreSQL. El timer depende de que EC2 y systemd arranquen; no recupera un host que no inicia. El reinicio requiere autorización separada.
+
+## Punto de control del volumen raíz, previo al reinicio
+
+La instancia auditada tiene un volumen raíz EBS de 20 GiB, unido y en uso, con aproximadamente 10.7 GiB libres. El directorio de Docker y los datos de PostgreSQL están **en ese mismo volumen**. El volumen no está cifrado, el cifrado EBS predeterminado de la región está desactivado y el bloqueo regional de compartición pública de snapshots está desactivado. No había snapshots pendientes del volumen. Estos hallazgos no autorizan cambiar la configuración regional ni crear recursos.
+
+Un snapshot directo del volumen activo sería **no cifrado** y solo representaría los datos escritos en disco en ese momento; se usará exclusivamente como recuperación de archivos/configuración del host. La copia lógica PostgreSQL, verificada mediante restauración aislada y conservada fuera de EC2, sigue siendo el punto de recuperación de la base. No restaurar el volumen raíz completo automáticamente: al estar PostgreSQL en él, eso podría perder transacciones posteriores al snapshot.
+
+La secuencia autorizada concluyó con `SNAPSHOT_CIFRADO_OK`: se creó el snapshot directo **privado** del volumen raíz exacto, se esperó `completed`, se hizo una copia **cifrada** en la misma región y se confirmó propietario, progreso, clave KMS habilitada y ausencia de permisos compartidos. Después se eliminó únicamente el original temporal sin cifrar y se volvió a confirmar la copia. No se creó un volumen de prueba desde la copia; `completed` prueba la disponibilidad reportada por AWS, no una restauración funcional del sistema. Para una avería de arranque, crear un volumen desde la copia cifrada y usarlo en un entorno de rescate, preservando el volumen raíz actual y los pagos posteriores. Toda maniobra de recuperación de host requiere autorización adicional.
+
+## Ventana de reinicio, solo tras autorización
+
+1. Repetir preflight de servicios, IAM 404 y reglas. Habilitar y arrancar **antes** del reinicio `osmi-email-imds-rollback.timer`. Verificar `active/enabled`, `NextElapseUSecMonotonic` no vacío y `LEFT` próximo a 15 minutos. `NextElapseUSecRealtime` vacío es normal para `OnActiveSec`.
+2. Reiniciar **solo esta EC2** desde la consola EC2 mediante *Reboot instance*, no *Stop/Start*. Confirmar antes que el timer esté armado y que la instancia seleccionada sea la auditada. No ejecutar `docker compose up`, migraciones, cambios IAM ni CloudFormation en esta ventana.
+3. Tras reconectar, comprobar: guard activo y reglas exactas, Docker activo, seis contenedores en ejecución, salud de los cinco con healthcheck, Worker de reservas sin reinicios inesperados, PostgreSQL listo, API de origen/sitio público HTTP 200 y bloqueo TCP de IMDS desde los seis contenedores. Confirmar que el timer sigue armado mientras se hacen las pruebas y que sus reglas cargaron antes del arranque de Docker. Registrar PASS/FAIL sin identificadores comerciales ni secretos.
+4. Si falla una comprobación y SSH funciona, iniciar `osmi-email-imds-rollback.service` y verificar su `Result`, Docker y API; **no forzar** la retirada si IAM dejó de responder 404 o cambió un hash. Si SSH no funciona pero systemd sí, esperar el disparo del timer, reconectar y verificar el resultado. Si la instancia no arranca, usar el procedimiento de recuperación del volumen/snapshot aprobado; el timer no puede funcionar en ese caso.
+5. Solo tras todos los PASS, detener y deshabilitar el timer, comprobar `inactive/disabled`, y conservar el servicio de rollback para reversión manual. No asociar IAM hasta haber registrado el resultado del reinicio.
+
+## Límite de la prueba
+
+La prueba demuestra persistencia para **este** arranque y las redes actuales. Antes de asociar el perfil IAM se debe comprobar de nuevo que solo la futura red `br-osmi-email` puede llegar a IMDS y que ningún contenedor adicional obtuvo privilegios, red host o socket Docker. El perfil EC2 sigue siendo una identidad de toda la instancia, no una identidad por contenedor.

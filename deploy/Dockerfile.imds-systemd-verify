@@ -1,0 +1,16 @@
+FROM ubuntu:24.04
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY deploy/systemd/osmi-email-imds-guard.service /test-units/osmi-email-imds-guard.service
+COPY deploy/systemd/osmi-email-imds-rollback.service /test-units/osmi-email-imds-rollback.service
+COPY deploy/systemd/osmi-email-imds-rollback.timer /test-units/osmi-email-imds-rollback.timer
+
+RUN chmod 0644 /test-units/*.service /test-units/*.timer \
+    && systemd-analyze verify \
+    /test-units/osmi-email-imds-guard.service \
+    /test-units/osmi-email-imds-rollback.service \
+    /test-units/osmi-email-imds-rollback.timer \
+    && echo IMDS_SYSTEMD_UNITS_PASS

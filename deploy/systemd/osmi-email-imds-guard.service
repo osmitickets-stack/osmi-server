@@ -1,0 +1,8 @@
+[Unit]
+Description=Block EC2 metadata from other Docker networks before Docker starts
+Before=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/osmi/deploy/ensure-imds-email-guard.sh load
+RemainAfterExit=yes
