@@ -65,13 +65,26 @@ func TestSESEventJobStateAcrossAttempts(t *testing.T) {
 		{"accepted", "bounced", false, false},
 		{"bounced", "delivered", false, true},
 		{"delivered", "bounced", true, false},
+		{"rejected", "bounced", true, true},
+		{"bounced", "rejected", true, false},
+		{"bounced", "delayed", true, false},
 		{"delivered", "complained", false, true},
 		{"complained", "delivered", true, false},
+		{"complained", "bounced", true, false},
 		{"retrying", "delivered", false, true},
 	}
 	for _, tc := range cases {
 		if got := shouldAdvanceJob(tc.current, tc.incoming, tc.isCurrent); got != tc.want {
 			t.Errorf("status=%s incoming=%s current_attempt=%t: got %t, want %t", tc.current, tc.incoming, tc.isCurrent, got, tc.want)
+		}
+	}
+}
+
+func TestSESEventRankIsMonotonic(t *testing.T) {
+	statuses := []string{"accepted", "delayed", "rejected", "bounced", "delivered", "complained"}
+	for i := 1; i < len(statuses); i++ {
+		if eventRank(statuses[i-1]) >= eventRank(statuses[i]) {
+			t.Fatalf("%s must precede %s", statuses[i-1], statuses[i])
 		}
 	}
 }

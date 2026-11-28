@@ -96,12 +96,14 @@ func eventRank(status string) int {
 		return 1
 	case "delayed":
 		return 2
-	case "delivered":
+	case "rejected":
 		return 3
-	case "bounced", "rejected":
+	case "bounced":
 		return 4
-	case "complained":
+	case "delivered":
 		return 5
+	case "complained":
+		return 6
 	default:
 		return 0
 	}
@@ -178,7 +180,27 @@ func (o *TicketEmailOutbox) RecordSESEvent(ctx context.Context, event *SESEvent)
 			return errors.New("SES event recipient does not match order")
 		}
 	}
-	if eventRank(newStatus) >= eventRank(previousStatus) {
+	// A bounce or complaint for another recipient must not change this order's
+	// delivery state. SES can omit complaint recipients for privacy; in that
+	// case the single envelope recipient identifies the affected buyer.
+	affected := affectedRecipients(event)
+	if event.EventType == "Bounce" || event.EventType == "Complaint" {
+		matched := false
+		for _, address := range affected {
+			matched = matched || strings.EqualFold(strings.TrimSpace(address), orderRecipient)
+		}
+		if event.EventType == "Complaint" && len(affected) == 0 && len(event.Mail.Destination) == 1 {
+			matched = strings.EqualFold(strings.TrimSpace(event.Mail.Destination[0]), orderRecipient)
+		}
+		if !matched {
+			return errors.New("SES feedback recipient does not match order")
+		}
+	}
+	// An identical SES event can be delivered more than once by SQS. The
+	// first event may fill in a missing message ID, but later copies must not
+	// rewrite the attempt or its audit timestamp.
+	if eventRank(newStatus) > eventRank(previousStatus) ||
+		(newStatus == previousStatus && previousMessageID == "") {
 		_, err = tx.Exec(ctx, `
 			UPDATE notifications.ticket_email_attempts
 			SET status=$2, ses_message_id=$3, last_event_at=NOW(),
@@ -216,21 +238,13 @@ func (o *TicketEmailOutbox) RecordSESEvent(ctx context.Context, event *SESEvent)
 	}
 	if (event.EventType == "Bounce" && event.Bounce.BounceType == "Permanent") || event.EventType == "Complaint" {
 		reason := strings.ToLower(event.EventType)
-		// SES may omit the complaining address. A tracked ticket message has
-		// exactly one recipient, and mail.destination was checked above.
-		matched := false
-		for _, address := range affectedRecipients(event) {
-			matched = matched || strings.EqualFold(strings.TrimSpace(address), orderRecipient)
-		}
-		if event.EventType == "Complaint" && len(affectedRecipients(event)) == 0 && len(event.Mail.Destination) == 1 {
-			matched = strings.EqualFold(strings.TrimSpace(event.Mail.Destination[0]), orderRecipient)
-		}
-		if matched && !strings.HasSuffix(strings.ToLower(orderRecipient), "@simulator.amazonses.com") {
+		if !strings.HasSuffix(strings.ToLower(orderRecipient), "@simulator.amazonses.com") {
 			_, err = tx.Exec(ctx, `
 				INSERT INTO notifications.email_suppressions(recipient_sha256,reason)
 				VALUES ($1,$2)
 				ON CONFLICT (recipient_sha256) DO UPDATE
 				SET reason=EXCLUDED.reason, updated_at=NOW()
+				WHERE email_suppressions.reason='bounce' AND EXCLUDED.reason='complaint'
 			`, recipientHash(orderRecipient), reason)
 			if err != nil {
 				return fmt.Errorf("record email suppression: %w", err)
